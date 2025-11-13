@@ -1,6 +1,7 @@
 use crate::tui::renderer::{Screen, EFI_GREEN, EFI_LIGHTGREEN, EFI_BLACK, EFI_DARKGREEN};
 use crate::tui::input::{Keyboard, InputKey};
 use crate::tui::rain::MatrixRain;
+use crate::tui::debug::DebugOverlay;
 
 const HEADER_ART: &[&str] = &[
     "  _____ _____ _____ _____ _   _ _____ _   _ _____ ",
@@ -19,7 +20,8 @@ const DIVIDER: &str = "+========================================================
 pub struct MainMenu {
     selected_index: usize,
     menu_items: [MenuItem; 6],
-    rain: MatrixRain,
+    rain: Option<MatrixRain>,
+    debug: DebugOverlay,
 }
 
 pub struct MenuItem {
@@ -29,10 +31,11 @@ pub struct MenuItem {
 }
 
 impl MainMenu {
-    pub fn new(screen: &Screen) -> Self {
+    pub fn new(_screen: &Screen) -> Self {
         Self {
             selected_index: 0,
-            rain: MatrixRain::new(screen.width(), screen.height()),
+            rain: None,
+            debug: DebugOverlay::new(),
             menu_items: [
                 MenuItem {
                     label: "Distro Launcher",
@@ -50,9 +53,9 @@ impl MainMenu {
                     icon: "[FS]",
                 },
                 MenuItem {
-                    label: "System Settings",
-                    description: "Configure bootloader and system preferences",
-                    icon: "[CFG]",
+                    label: "Installation",
+                    description: "Persists the bootloader to disk",
+                    icon: "[INS]",
                 },
                 MenuItem {
                     label: "Admin Functions",
@@ -81,12 +84,6 @@ impl MainMenu {
     }
 
     pub fn render(&mut self, screen: &mut Screen) {
-        // Calculate centered position using screen helpers
-        let border_width = 77;
-        let x = screen.center_x(border_width);
-        let y = 0;
-        
-        // Draw top border
         // Calculate centered X position based on border width (77 chars)
         let border_width = 77;
         let x = if screen.width() > border_width {
@@ -208,13 +205,43 @@ impl MainMenu {
         // Initial render
         screen.clear();
         self.render(screen);
+        self.debug.render(screen);
         
         loop {
-            // Animate rain in background
-            self.rain.render_frame(screen);
+            // Easter egg: render rain if active
+            if let Some(ref mut rain) = self.rain {
+                rain.render_frame(screen);
+            }
+            
+            // Always render debug overlay on top
+            self.debug.render(screen);
             
             // Check for input (non-blocking)
             if let Some(key) = keyboard.read_key() {
+                // Debug overlay toggle
+                if key.unicode_char == b'd' as u16 || key.unicode_char == b'D' as u16 {
+                    self.debug.toggle();
+                    screen.clear();
+                    self.render(screen);
+                    self.debug.render(screen);
+                    continue;
+                }
+                
+                // Easter egg: 'x' key toggles rain effect
+                if key.unicode_char == b'x' as u16 || key.unicode_char == b'X' as u16 {
+                    // Toggle rain easter egg
+                    if self.rain.is_none() {
+                        self.rain = Some(MatrixRain::new(screen.width(), screen.height()));
+                    } else {
+                        self.rain = None;
+                        // Restore UI
+                        screen.clear();
+                        self.render(screen);
+                        self.debug.render(screen);
+                    }
+                    continue;
+                }
+                
                 let action = self.handle_input(&key);
                 if !matches!(action, MenuAction::Navigate) {
                     return action;
@@ -223,6 +250,7 @@ impl MainMenu {
                 // Re-render UI after navigation
                 screen.clear();
                 self.render(screen);
+                self.debug.render(screen);
             }
         }
     }

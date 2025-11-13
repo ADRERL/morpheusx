@@ -49,7 +49,7 @@ pub fn enumerate_disks(bs: &BootServices, manager: &mut DiskManager) -> Result<(
     let handle_count = buffer_size / core::mem::size_of::<*mut ()>();
     
     for i in 0..handle_count {
-        let handle = unsafe { *handles.offset(i as isize) };
+        let handle = unsafe { *handles.add(i) };
         
         let mut block_io_ptr: *mut () = core::ptr::null_mut();
         let proto_status = (bs.handle_protocol)(
@@ -127,7 +127,7 @@ pub fn get_disk_protocol(
     let mut result: Option<*mut BlockIoProtocol> = None;
     
     for i in 0..handle_count {
-        let handle = unsafe { *handles.offset(i as isize) };
+        let handle = unsafe { *handles.add(i) };
         
         let mut block_io_ptr: *mut () = core::ptr::null_mut();
         let proto_status = (bs.handle_protocol)(
@@ -203,7 +203,7 @@ pub fn get_disk_handle(bs: &BootServices, disk_index: usize) -> Result<*mut (), 
     let mut result = None;
     
     for i in 0..handle_count {
-        let handle = unsafe { *handles.offset(i as isize) };
+        let handle = unsafe { *handles.add(i) };
         
         let mut block_io_ptr: *mut () = core::ptr::null_mut();
         let proto_status = (bs.handle_protocol)(

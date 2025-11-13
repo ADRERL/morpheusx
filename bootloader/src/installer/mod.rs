@@ -48,7 +48,7 @@ pub fn find_esp(bs: &BootServices) -> Result<EspInfo, InstallError> {
         let block_size = media.block_size as usize;
         
         // Create adapter
-        let mut adapter = match crate::uefi::gpt_adapter::UefiBlockIoAdapter::new(block_io) {
+        let adapter = match crate::uefi::gpt_adapter::UefiBlockIoAdapter::new(block_io) {
             Ok(a) => a,
             Err(_) => continue,
         };
@@ -153,8 +153,7 @@ pub fn install_to_esp(bs: &BootServices, esp: &EspInfo, image_handle: *mut ()) -
             .map_err(|_| InstallError::ProtocolError)?;
         
         // Copy full memory image (needed for unrelocate - RVAs are memory-based)
-        let mut binary_data = alloc::vec::Vec::new();
-        binary_data.resize(image_size, 0u8);
+        let mut binary_data = alloc::vec![0u8; image_size];
         core::ptr::copy_nonoverlapping(image_base, binary_data.as_mut_ptr(), image_size);
         
         // DEBUG: Check buffer IMMEDIATELY after copy, BEFORE unrelocate

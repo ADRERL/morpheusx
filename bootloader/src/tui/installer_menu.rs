@@ -73,11 +73,11 @@ impl InstallerMenu {
         let start_y = 2;
         
         // Title
-        screen.put_str_at(start_x, start_y, "=== BOOTLOADER INSTALLER ===", EFI_LIGHTGREEN, EFI_BLACK);
+        screen.put_str_at(start_x, start_y, "=== Persistance Installer ===", EFI_LIGHTGREEN, EFI_BLACK);
         
         // Scan for ESPs if not done yet
         if !self.scan_complete {
-            screen.put_str_at(start_x, start_y + 2, "Scanning for EFI System Partitions...", EFI_GREEN, EFI_BLACK);
+            screen.put_str_at(start_x, start_y + 2, "Scanning for EFI Partitions...", EFI_GREEN, EFI_BLACK);
             self.scan_for_esps(bs);
             self.scan_complete = true;
         }
@@ -85,15 +85,15 @@ impl InstallerMenu {
         let mut y = start_y + 2;
         
         if self.esp_list.is_empty() {
-            screen.put_str_at(start_x, y, "No EFI System Partition found", EFI_LIGHTGREEN, EFI_BLACK);
+            screen.put_str_at(start_x, y, "No EFI Partition found", EFI_LIGHTGREEN, EFI_BLACK);
             y += 2;
             screen.put_str_at(start_x, y, "You can:", EFI_GREEN, EFI_BLACK);
             y += 1;
-            screen.put_str_at(start_x, y, "  [C] Create new ESP partition", EFI_DARKGREEN, EFI_BLACK);
+            screen.put_str_at(start_x, y, "  [C] How to create new ESP partition", EFI_DARKGREEN, EFI_BLACK);
             y += 1;
             screen.put_str_at(start_x, y, "  [R] Rescan for ESPs", EFI_DARKGREEN, EFI_BLACK);
         } else {
-            screen.put_str_at(start_x, y, "Found EFI System Partitions:", EFI_LIGHTGREEN, EFI_BLACK);
+            screen.put_str_at(start_x, y, "Found EFI Partitions:", EFI_LIGHTGREEN, EFI_BLACK);
             y += 2;
             
             // Table header
@@ -143,7 +143,7 @@ impl InstallerMenu {
             y += 1;
             screen.put_str_at(start_x, y, "  [ENTER] Install to selected ESP", EFI_DARKGREEN, EFI_BLACK);
             y += 1;
-            screen.put_str_at(start_x, y, "  [C] Create new ESP partition", EFI_DARKGREEN, EFI_BLACK);
+            screen.put_str_at(start_x, y, "  [C] How to create new ESP partition", EFI_DARKGREEN, EFI_BLACK);
             y += 1;
             screen.put_str_at(start_x, y, "  [R] Rescan for ESPs", EFI_DARKGREEN, EFI_BLACK);
         }
@@ -204,7 +204,7 @@ impl InstallerMenu {
         let start_x = 2;
         let mut y = 1;
         
-        screen.put_str_at(start_x, y, "=== BOOTLOADER PERSISTENCE INSTALLER ===", EFI_LIGHTGREEN, EFI_BLACK);
+        screen.put_str_at(start_x, y, "=== PERSISTENCE INSTALLER ===", EFI_LIGHTGREEN, EFI_BLACK);
         y += 1;
         
         if self.esp_list.is_empty() || self.selected_esp >= self.esp_list.len() {
@@ -221,7 +221,7 @@ impl InstallerMenu {
         
         // Phase 1: Parse PE headers from running bootloader
         y += 1;
-        screen.put_str_at(start_x, y, "--- PE Header Analysis ---", EFI_CYAN, EFI_BLACK);
+        screen.put_str_at(start_x, y, "--- PE Header Analysis ---", EFI_LIGHTGREEN, EFI_BLACK);
         y += 1;
         
         feedback.info(FeedbackCategory::PeHeader, "Analyzing running bootloader image...");
@@ -269,7 +269,7 @@ impl InstallerMenu {
                 
                 // Reconstruct original ImageBase by analyzing .reloc section
                 feedback.info(FeedbackCategory::Relocation, 
-                    "Reverse-engineering original ImageBase...");
+                    "Reversing original ImageBase...");
                 self.render_feedback(screen, &feedback, start_x, &mut y);
                 
                 let actual_load = image_base as u64;
@@ -332,7 +332,7 @@ impl InstallerMenu {
                         feedback.success(FeedbackCategory::Storage, 
                             "Bootloader written successfully!");
                         feedback.success(FeedbackCategory::General, 
-                            "Installation complete - system is now persistent");
+                            "Morpheus is now persistent");
                         self.render_feedback(screen, &feedback, start_x, &mut y);
                     }
                     Err(e) => {

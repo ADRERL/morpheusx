@@ -359,7 +359,7 @@ impl PeHeaders {
             let block_size = read_u32(reloc_data_ptr, block_offset + 4);
             
             // Validate block
-            if block_size < 8 || block_size > 1024 {
+            if !(8..=1024).contains(&block_size) {
                 break;  // Invalid or end marker
             }
             

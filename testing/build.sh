@@ -30,8 +30,16 @@ rustup target add x86_64-unknown-uefi 2>/dev/null || true
 echo "Cleaning build cache..."
 cargo clean
 
-# Build
-echo "Building bootloader with hardcoded reloc data..."
+# Build (first pass to get binary for reloc extraction)
+echo "Building bootloader (pass 1)..."
+cargo build --target x86_64-unknown-uefi -p morpheus-bootloader --release
+
+# Extract relocation data from the built binary
+echo "Extracting relocation metadata..."
+./tools/extract-reloc-data.sh
+
+# Rebuild with correct embedded relocation data
+echo "Building bootloader (pass 2 with correct reloc data)..."
 cargo build --target x86_64-unknown-uefi -p morpheus-bootloader --release
 
 # Copy to test ESP

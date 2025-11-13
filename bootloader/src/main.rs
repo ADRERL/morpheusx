@@ -295,13 +295,14 @@ unsafe impl GlobalAlloc for UefiAllocator {
         let status = (bs.allocate_pool)(2, layout.size(), &mut buffer);
         
         if status == 0 {
+            tui::debug::track_allocation(layout.size());
             buffer
         } else {
             core::ptr::null_mut()
         }
     }
     
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let bs = BOOT_SERVICES_PTR;
         if bs.is_null() || ptr.is_null() {
             return;
@@ -309,6 +310,7 @@ unsafe impl GlobalAlloc for UefiAllocator {
         
         let bs = &*bs;
         let _ = (bs.free_pool)(ptr);
+        tui::debug::track_free(layout.size());
     }
 }
 
