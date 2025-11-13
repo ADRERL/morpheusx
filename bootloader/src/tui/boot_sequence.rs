@@ -23,11 +23,7 @@ impl BootSequence {
         let log_count = logs.len();
         
         // Only show last 20 logs to fit on screen
-        let start_idx = if log_count > 20 {
-            log_count - 20
-        } else {
-            0
-        };
+        let start_idx = log_count.saturating_sub(20);
 
         for (i, log_opt) in logs[start_idx..log_count].iter().enumerate() {
             if let Some(log) = log_opt {

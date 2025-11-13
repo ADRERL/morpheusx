@@ -103,7 +103,7 @@ impl StorageManager {
 
     pub fn run(&mut self, screen: &mut Screen, keyboard: &mut Keyboard, bs: &BootServices) -> bool {
         // Enumerate disks using UEFI helper
-        if let Err(_) = crate::uefi::disk::enumerate_disks(bs, &mut self.disk_manager) {
+        if crate::uefi::disk::enumerate_disks(bs, &mut self.disk_manager).is_err() {
             screen.clear();
             screen.put_str_at(5, 10, "ERROR: Failed to enumerate disks", EFI_LIGHTGREEN, EFI_BLACK);
             screen.put_str_at(5, 12, "Press any key to return...", EFI_GREEN, EFI_BLACK);

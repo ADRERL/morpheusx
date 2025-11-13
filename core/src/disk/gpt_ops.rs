@@ -411,7 +411,7 @@ pub fn shrink_partition<B: BlockIo>(
 /// Align LBA to 1MB boundary (2048 sectors for 512-byte blocks)
 pub fn align_lba(lba: u64, block_size_bytes: u32) -> u64 {
     let alignment = (1024 * 1024) / block_size_bytes as u64; // 1MB alignment
-    ((lba + alignment - 1) / alignment) * alignment
+    lba.div_ceil(alignment) * alignment
 }
 
 /// Calculate size in LBA from MB
@@ -427,10 +427,8 @@ pub fn calculate_total_free_space<B: BlockIo>(
     let free_regions = find_free_space(block_io, block_size_bytes)?;
     
     let mut total_free_lba = 0u64;
-    for region_opt in &free_regions {
-        if let Some(region) = region_opt {
-            total_free_lba += region.size_lba();
-        }
+    for region in free_regions.iter().flatten() {
+        total_free_lba += region.size_lba();
     }
     
     // Convert to MB

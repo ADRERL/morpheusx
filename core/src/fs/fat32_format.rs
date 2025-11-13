@@ -138,9 +138,7 @@ fn calculate_fat_size(total_sectors: u32, reserved_sectors: u16, sectors_per_clu
     let tmp1 = total_sectors - reserved_sectors as u32;
     let tmp2 = (bytes_per_sector * sectors_per_cluster as u32) + (num_fats * 4);
     
-    let fat_size_sectors = (tmp1 * bytes_per_sector + tmp2 - 1) / tmp2;
-    
-    fat_size_sectors
+    (tmp1 * bytes_per_sector).div_ceil(tmp2)
 }
 
 /// Format partition as FAT32
