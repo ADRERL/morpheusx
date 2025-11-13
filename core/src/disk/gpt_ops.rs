@@ -203,9 +203,7 @@ pub fn find_free_space<B: BlockIo>(
     for i in 0..used_count {
         for j in i + 1..used_count {
             if used_ranges[j].0 < used_ranges[i].0 {
-                let tmp = used_ranges[i];
-                used_ranges[i] = used_ranges[j];
-                used_ranges[j] = tmp;
+                used_ranges.swap(i, j);
             }
         }
     }

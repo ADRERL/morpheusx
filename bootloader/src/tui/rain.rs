@@ -27,6 +27,8 @@ pub struct RainColumn {
     pub y: isize,
     pub length: usize,
     pub speed: usize,
+    pub tick_delay: u32,  // Frames to wait before next update
+    pub tick_counter: u32, // Current frame counter
 }
 
 impl RainColumn {
@@ -35,15 +37,27 @@ impl RainColumn {
             x,
             y: -(rng.range(15) as isize),
             length: (rng.range(6) + 4) as usize,
-            speed: 1,  // Always 1 for slower, smoother fall
+            speed: 1,
+            tick_delay: if rng.range(3) == 0 { 2 } else { 1 }, // Mostly 1, occasionally 2
+            tick_counter: 0,
         }
     }
 
     pub fn update(&mut self, max_y: usize, rng: &mut Rng) {
-        self.y += self.speed as isize;
-        if self.y > max_y as isize + self.length as isize {
-            self.y = -(rng.range(10) as isize);
-            self.length = (rng.range(6) + 4) as usize;
+        // Increment tick counter
+        self.tick_counter += 1;
+        
+        // Only update position when tick counter reaches delay
+        if self.tick_counter >= self.tick_delay {
+            self.tick_counter = 0; // Reset counter
+            self.y += self.speed as isize;
+            
+            // Reset column when it goes off screen
+            if self.y > max_y as isize + self.length as isize {
+                self.y = -(rng.range(10) as isize);
+                self.length = (rng.range(6) + 4) as usize;
+                self.tick_delay = if rng.range(3) == 0 { 2 } else { 1 }; // Mostly 1, occasionally 2
+            }
         }
     }
 }
@@ -53,21 +67,31 @@ pub struct MatrixRain {
     rng: Rng,
     screen_height: usize,
     screen_width: usize,
+    frame_count: u32,
 }
 
 impl MatrixRain {
     pub fn new(screen_width: usize, screen_height: usize) -> Self {
         let mut rng = Rng::new(0x1337BEEF);
-        let num_cols = (screen_width / 3).min(40).max(10);
+        // One column per character position for dense rain
+        let num_cols = screen_width;
         
         let mut columns = Vec::new();
         
-        // Distribute columns across screen width
-        let spacing = screen_width / num_cols;
-        for i in 0..num_cols {
-            let mut col = RainColumn::new(i * spacing, &mut rng);
-            col.x = i * spacing;
-            columns.push(col);
+        // Create a column for every x position with heavily staggered start positions
+        for x in 0..num_cols {
+            // Spread initial positions across a large range to create continuous flow
+            let max_offset = screen_height * 2;
+            let y_offset = (x * max_offset / num_cols) as isize;
+            
+            columns.push(RainColumn {
+                x,
+                y: -(rng.range(20) as isize) - y_offset,
+                length: (rng.range(6) + 4) as usize,
+                speed: 1,
+                tick_delay: if rng.range(3) == 0 { 2 } else { 1 },
+                tick_counter: 0,
+            });
         }
 
         Self { 
@@ -75,23 +99,30 @@ impl MatrixRain {
             rng, 
             screen_height,
             screen_width,
+            frame_count: 0,
         }
     }
 
     // Simple busy-wait delay - controls animation speed independently
     fn delay(&self) {
-        for _ in 0..40000000 {  // slow drip for cinematic effect
-            unsafe { core::ptr::read_volatile(&0); }
+        // Safe busy loop without dangerous volatile reads
+        let mut counter = 0u32;
+        for _ in 0..40000000 {
+            counter = counter.wrapping_add(1);
+            // Prevents optimizer from removing the loop
+            core::hint::black_box(counter);
         }
     }
-
+    
     pub fn render_frame(&mut self, screen: &mut Screen) {
-        // Update all column positions (independent of any external frame counter)
+        self.frame_count = self.frame_count.wrapping_add(1);
+        
+        // Update all column positions
         for col in &mut self.columns {
             col.update(self.screen_height, &mut self.rng);
         }
 
-        // Render each column
+        // Render each column - IGNORING mask to eat through UI
         for col in &self.columns {
             for i in 0..col.length {
                 let y = col.y - i as isize;
@@ -100,28 +131,18 @@ impl MatrixRain {
                     let y_pos = y as usize;
                     let x_pos = col.x;
                     
-                    // Check if this position is masked (has content)
-                    let is_masked = if y_pos < screen.mask.len() && x_pos < screen.mask[0].len() {
-                        screen.mask[y_pos][x_pos]
+                    // Easter egg mode: render rain OVER everything, eating the UI
+                    let (ch, color) = if i == 0 { 
+                        // Head: bright green binary
+                        (if self.rng.range(2) == 0 { '1' } else { '0' }, EFI_LIGHTGREEN)
+                    } else if i < 3 {
+                        // Middle: normal green binary  
+                        (if self.rng.range(2) == 0 { '1' } else { '0' }, EFI_DARKGREEN)
                     } else {
-                        false
+                        // Tail: dim green dots for cosmic trail effect
+                        (if self.rng.range(3) == 0 { '.' } else { ' ' }, EFI_DARKGREEN)
                     };
-                    
-                    // Only render rain if position is not masked
-                    if !is_masked {
-                        // Use different characters for depth perception
-                        let (ch, color) = if i == 0 { 
-                            // Head: bright green binary
-                            (if self.rng.range(2) == 0 { '1' } else { '0' }, EFI_LIGHTGREEN)
-                        } else if i < 3 {
-                            // Middle: normal green binary  
-                            (if self.rng.range(2) == 0 { '1' } else { '0' }, EFI_DARKGREEN)
-                        } else {
-                            // Tail: dim green with lighter characters for fade effect
-                            (if self.rng.range(3) == 0 { '.' } else { ' ' }, EFI_DARKGREEN)
-                        };
-                        screen.put_char_at(x_pos, y_pos, ch, color, EFI_BLACK);
-                    }
+                    screen.put_char_at(x_pos, y_pos, ch, color, EFI_BLACK);
                 }
             }
         }

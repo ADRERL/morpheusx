@@ -6,8 +6,8 @@ use gpt_disk_io::BlockIo;
 use gpt_disk_types::Lba;
 
 extern crate alloc;
+use alloc::vec;
 use alloc::vec::Vec;
-use alloc::string::String;
 
 const SECTOR_SIZE: usize = 512;
 const ATTR_DIRECTORY: u8 = 0x10;
@@ -70,7 +70,7 @@ impl DirEntry {
         // Convert to uppercase
         for byte in &mut self.name {
             if *byte >= b'a' && *byte <= b'z' {
-                *byte = *byte - 32;
+                *byte -= 32;
             }
         }
     }
@@ -271,8 +271,7 @@ fn create_directory_in_parent<B: BlockIo>(
     
     // Initialize new directory cluster with . and .. entries
     let cluster_size = (ctx.sectors_per_cluster * SECTOR_SIZE as u32) as usize;
-    let mut cluster_data = Vec::new();
-    cluster_data.resize(cluster_size, 0u8);
+    let mut cluster_data = vec![0u8; cluster_size];
     
     // Create '.' entry (points to self)
     let mut dot_entry = DirEntry::empty();
@@ -340,8 +339,7 @@ fn write_file_in_directory<B: BlockIo>(
         let data_end = (data_offset + cluster_size).min(data.len());
         let chunk_size = data_end - data_offset;
         
-        let mut cluster_data = Vec::new();
-        cluster_data.resize(cluster_size, 0u8);
+        let mut cluster_data = vec![0u8; cluster_size];
         cluster_data[..chunk_size].copy_from_slice(&data[data_offset..data_end]);
         
         let sector = ctx.cluster_to_sector(cluster);
