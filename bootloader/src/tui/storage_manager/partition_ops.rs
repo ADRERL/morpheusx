@@ -151,7 +151,7 @@ impl StorageManager {
             let mut requested_mb = 0u64;
             
             for byte in size_text.bytes() {
-                if byte >= b'0' && byte <= b'9' {
+                if (b'0'..=b'9').contains(&byte) {
                     requested_mb = requested_mb * 10 + (byte - b'0') as u64;
                 }
             }
@@ -359,7 +359,7 @@ impl StorageManager {
         let mut new_size_mb = 0u64;
         
         for byte in size_text.bytes() {
-            if byte >= b'0' && byte <= b'9' {
+            if (b'0'..=b'9').contains(&byte) {
                 new_size_mb = new_size_mb * 10 + (byte - b'0') as u64;
             }
         }

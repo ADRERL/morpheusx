@@ -1,4 +1,5 @@
 use crate::SimpleTextOutputProtocol;
+use alloc::vec;
 use alloc::vec::Vec;
 
 // EFI text colors
@@ -36,10 +37,7 @@ impl Screen {
         // Create dynamic mask based on actual screen size
         let mut mask = Vec::new();
         for _ in 0..height {
-            let mut row = Vec::new();
-            for _ in 0..width {
-                row.push(false);
-            }
+            let row = vec![false; width];
             mask.push(row);
         }
         
