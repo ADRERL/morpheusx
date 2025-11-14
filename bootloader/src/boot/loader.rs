@@ -20,30 +20,43 @@ pub unsafe fn boot_linux_kernel(
     kernel_data: &[u8],
     cmdline: &str,
 ) -> ! {
+    morpheus_core::logger::log("Parsing kernel...");
+    
     // Parse kernel image
     let kernel = match KernelImage::parse(kernel_data) {
         Ok(k) => k,
         Err(_) => panic!("Failed to parse kernel"),
     };
 
+    morpheus_core::logger::log("Allocating kernel memory...");
+    
     // Allocate memory for kernel
     let kernel_dest = match allocate_kernel_memory(boot_services, &kernel) {
         Ok(d) => d,
         Err(_) => panic!("Failed to allocate kernel memory"),
     };
 
+    morpheus_core::logger::log("Loading kernel to memory...");
+    
     // Load kernel into memory
     let _ = load_kernel_image(&kernel, kernel_dest);
 
+    morpheus_core::logger::log("Setting up boot params...");
+    
     // Allocate boot parameters
     let boot_params = match allocate_boot_params(boot_services) {
         Ok(b) => b,
         Err(_) => panic!("Failed to allocate boot params"),
     };
 
+    // CRITICAL: Copy the setup header from kernel to boot params
+    // The kernel expects to see its own setup header in boot_params
+    (*boot_params).copy_setup_header(kernel.setup_header_ptr());
+    
     // Setup boot params
     (*boot_params).set_loader_type(0xFF); // 0xFF = undefined loader
-
+    (*boot_params).set_video_mode(); // Basic text mode
+    
     // Allocate and set command line
     if !cmdline.is_empty() {
         if let Ok(cmdline_ptr) = allocate_cmdline(boot_services, cmdline) {
@@ -51,6 +64,8 @@ pub unsafe fn boot_linux_kernel(
         }
     }
 
+    morpheus_core::logger::log("Exiting boot services...");
+    
     // Get memory map before exiting boot services
     let mut map_size: usize = 0;
     let mut map_key: usize = 0;
@@ -73,10 +88,9 @@ pub unsafe fn boot_linux_kernel(
         map_key,
     );
     
-    // If ExitBootServices fails, we're in trouble
-    // But we'll try to continue anyway for testing
+    // If ExitBootServices fails, retry once
     if exit_status != 0 {
-        // Retry once with updated map key
+        // Get updated map key
         let _ = (boot_services.get_memory_map)(
             &mut map_size,
             core::ptr::null_mut(),
@@ -90,14 +104,11 @@ pub unsafe fn boot_linux_kernel(
         );
     }
 
+    // CRITICAL: After ExitBootServices, we can't use UEFI services anymore
+    // No more logging, no more panics - we're on our own
+    
     // Jump to kernel (never returns)
-    // Need to create new KernelImage pointing to loaded location
-    let loaded_kernel = match KernelImage::parse(
-        core::slice::from_raw_parts(kernel_dest, kernel.kernel_size())
-    ) {
-        Ok(k) => k,
-        Err(_) => panic!("Failed to parse loaded kernel"),
-    };
-
-    boot_kernel(&loaded_kernel, boot_params, system_table)
+    // kernel still has the setup header from original bzImage
+    // kernel_dest is where we actually loaded the kernel code
+    boot_kernel(&kernel, boot_params, system_table, kernel_dest)
 }

@@ -132,7 +132,7 @@ struct EfiInfo {
 
 #[repr(C, packed)]
 pub struct SetupHeader {
-    setup_sects: u8,
+    pub setup_sects: u8,
     root_flags: u16,
     syssize: u32,
     ram_size: u16,
@@ -206,5 +206,23 @@ impl LinuxBootParams {
 
     pub fn set_loader_type(&mut self, loader_type: u8) {
         self.hdr.type_of_loader = loader_type;
+    }
+    
+    /// Copy setup header from kernel image to boot params
+    /// CRITICAL: The kernel expects its own setup header back
+    pub unsafe fn copy_setup_header(&mut self, kernel_setup_header: *const SetupHeader) {
+        core::ptr::copy_nonoverlapping(
+            kernel_setup_header,
+            &mut self.hdr as *mut SetupHeader,
+            1
+        );
+    }
+    
+    /// Set basic video mode (text mode fallback)
+    pub fn set_video_mode(&mut self) {
+        self.screen_info.orig_video_mode = 0x03; // 80x25 text mode
+        self.screen_info.orig_video_cols = 80;
+        self.screen_info.orig_video_lines = 25;
+        self.screen_info.orig_video_isVGA = 1;
     }
 }

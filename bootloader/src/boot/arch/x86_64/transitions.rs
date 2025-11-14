@@ -76,9 +76,9 @@ pub unsafe extern "C" fn drop_to_protected_mode(entry_point: u32, boot_params: u
     core::arch::naked_asm!(
         ".att_syntax",
         
-        // Save arguments (edi=entry_point, esi=boot_params)
-        "mov %edi, %r14d",           // entry_point → R14D
-        "mov %esi, %r15d",           // boot_params → R15D
+        // Save arguments on stack (edi=entry_point, esi=boot_params)
+        "push %rsi",                 // boot_params
+        "push %rdi",                 // entry_point
         
         // Disable interrupts (no coming back)
         "cli",
@@ -95,23 +95,25 @@ pub unsafe extern "C" fn drop_to_protected_mode(entry_point: u32, boot_params: u
         "wrmsr",
         
         // Switch to compatibility mode  
-        // We're now in 32-bit protected mode
         ".code32",
         ".intel_syntax noprefix",
         
-        // Zero out registers (except ESI which holds boot_params)
+        // Clear direction flag
+        "cld",
+        
+        // Pop arguments from stack (now in 32-bit mode)
+        "pop edi",                   // entry_point
+        "pop esi",                   // boot_params
+        
+        // Zero out registers
         "xor eax, eax",
         "xor ebx, ebx",
         "xor ecx, ecx",
         "xor edx, edx",
-        "xor edi, edi",
         "xor ebp, ebp",
         
-        // Set boot_params pointer in ESI
-        "mov esi, r15d",
-        
         // Jump to kernel entry point
-        "jmp r14d",
+        "jmp edi",
         
         ".att_syntax",
         ".code64",

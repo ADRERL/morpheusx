@@ -20,31 +20,33 @@ pub unsafe extern "C" fn efi_handoff_64(entry_point: u64, boot_params: u64) -> !
     core::arch::naked_asm!(
         ".att_syntax",
         
+        // Save entry point (RDI) to R11 before we zero it
+        "mov %rdi, %r11",
+        
         // Clear interrupts
         "cli",
         
         // Clear direction flag (required)
         "cld",
         
-        // Zero all registers except RSI (boot_params)
+        // Zero all registers except RSI (boot_params) and R11 (entry)
         "xor %rax, %rax",
         "xor %rbx, %rbx",
         "xor %rcx, %rcx",
         "xor %rdx, %rdx",
-        // RSI already contains boot_params (second arg)
         "xor %rdi, %rdi",
         "xor %rbp, %rbp",
         "xor %r8, %r8",
         "xor %r9, %r9",
         "xor %r10, %r10",
-        "xor %r11, %r11",
+        // R11 holds entry point - don't zero
         "xor %r12, %r12",
         "xor %r13, %r13",
         "xor %r14, %r14",
         "xor %r15, %r15",
         
-        // Jump to kernel (first arg in RDI)
-        "jmp *%rdi",
+        // Jump to kernel (entry point in R11)
+        "jmp *%r11",
     )
 }
 
@@ -63,23 +65,25 @@ pub unsafe extern "C" fn protected_mode_handoff_32(entry_point: u32, boot_params
         ".code32",
         ".intel_syntax noprefix",
         
+        // Save entry point (EDI) to EBP before we zero registers
+        "mov ebp, edi",
+        
         // Clear interrupts
         "cli",
         
         // Clear direction flag
         "cld",
         
-        // Zero all registers except ESI (boot_params)
+        // Zero all registers except ESI (boot_params) and EBP (entry)
         "xor eax, eax",
         "xor ebx, ebx",
         "xor ecx, ecx",
         "xor edx, edx",
-        // ESI already contains boot_params (second arg)
         "xor edi, edi",
-        "xor ebp, ebp",
+        // EBP holds entry point - don't zero
         
-        // Jump to kernel (first arg in EDI)
-        "jmp edi",
+        // Jump to kernel (entry point in EBP)
+        "jmp ebp",
         
         ".att_syntax",
         ".code64",
