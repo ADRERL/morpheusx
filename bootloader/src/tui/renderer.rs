@@ -8,6 +8,7 @@ pub const EFI_BLUE: usize = 0x01;       // Very dark, good for dim rain
 pub const EFI_DARKGREEN: usize = 0x02;  // Dim green for background rain
 pub const EFI_GREEN: usize = 0x02;
 pub const EFI_CYAN: usize = 0x03;       // Alternative dim color
+pub const EFI_RED: usize = 0x04;         // For errors
 pub const EFI_LIGHTGREEN: usize = 0x0A;
 pub const EFI_WHITE: usize = 0x0F;
 

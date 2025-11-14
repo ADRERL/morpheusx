@@ -12,6 +12,7 @@ use core::panic::PanicInfo;
 mod tui;
 mod uefi;
 mod installer;
+mod boot;
 
 use tui::renderer::Screen;
 use tui::logo::{LOGO_LINES_RAW, LOGO_WIDTH, TAGLINE, TAGLINE_WIDTH};
@@ -21,6 +22,7 @@ use tui::input::Keyboard;
 use tui::main_menu::{MainMenu, MenuAction};
 use tui::storage_manager::StorageManager;
 use tui::installer_menu::InstallerMenu;
+use tui::distro_launcher::DistroLauncher;
 
 #[repr(C)]
 pub struct SimpleTextInputProtocol {
@@ -74,7 +76,12 @@ struct BootServices {
     _raise_tpl: usize,
     _restore_tpl: usize,
     // Memory Services (correct order per UEFI spec)
-    _allocate_pages: usize,
+    pub allocate_pages: extern "efiapi" fn(
+        allocate_type: usize,
+        memory_type: usize,
+        pages: usize,
+        memory: u64,
+    ) -> usize,
     _free_pages: usize,
     _get_memory_map: usize,
     allocate_pool: extern "efiapi" fn(
@@ -227,9 +234,11 @@ pub extern "efiapi" fn efi_main(image_handle: *mut (), system_table: *const ()) 
             // Handle menu action
             match action {
                 MenuAction::DistroLauncher => {
-                    screen.clear();
-                    screen.put_str_at(5, 10, "Distro Launcher - Coming soon...", tui::renderer::EFI_LIGHTGREEN, tui::renderer::EFI_BLACK);
-                    keyboard.wait_for_key();
+                    let bs = &*system_table.boot_services;
+                    let st_ptr = system_table as *const SystemTable as *mut ();
+                    let mut launcher = DistroLauncher::new();
+                    launcher.run(&mut screen, &mut keyboard, bs, st_ptr, image_handle);
+                    // Returns when user presses ESC, loop continues to main menu
                 }
                 MenuAction::DistroDownloader => {
                     screen.clear();

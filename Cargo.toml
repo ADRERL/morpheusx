@@ -4,13 +4,8 @@ members = [
     "bootloader",
     "core",
     "persistent",
-    "redeco-integration",
     "updater",
-    "registry",
     "network",
-    "installer",
-    "cli",
-    "utils",
 ]
 
 [workspace.package]
@@ -24,11 +19,8 @@ license = "MIT OR Apache-2.0"
 # All workspace crates reference each other here
 morpheus-core = { path = "core" }
 morpheus-persistent = { path = "persistent" }
-morpheus-redeco = { path = "redeco-integration" }
 morpheus-updater = { path = "updater" }
-morpheus-registry = { path = "registry" }
 morpheus-network = { path = "network" }
-morpheus-utils = { path = "utils" }
 
 [profile.release]
 opt-level = "z"      # Optimize for size
