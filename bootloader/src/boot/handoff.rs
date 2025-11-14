@@ -16,6 +16,7 @@ pub unsafe fn boot_kernel(
     kernel: &KernelImage,
     boot_params: *mut LinuxBootParams,
     _system_table: *mut (),
+    kernel_loaded_addr: *mut u8,
 ) -> ! {
     // x86_64 architecture: choose optimal boot path
     #[cfg(target_arch = "x86_64")]
@@ -26,8 +27,8 @@ pub unsafe fn boot_kernel(
         let setup_header = kernel.setup_header_bytes();
         let handover_offset = check_efi_handover_support(setup_header);
         
-        // Determine entry points
-        let startup_64 = kernel.kernel_base() as u64;
+        // Entry points use the LOADED kernel address, not original bzImage
+        let startup_64 = kernel_loaded_addr as u64;
         let code32_start = kernel.code32_start();
         
         // We're currently in long mode (UEFI bootloader)

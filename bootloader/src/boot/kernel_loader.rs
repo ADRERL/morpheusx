@@ -1,5 +1,7 @@
 // Linux kernel (bzImage) loader
 
+use super::boot_params::SetupHeader;
+
 const KERNEL_MAGIC: u32 = 0x53726448; // "HdrS"
 
 #[derive(Debug)]
@@ -8,48 +10,6 @@ pub enum KernelError {
     InvalidFormat,
     UnsupportedVersion,
     AllocationFailed,
-}
-
-#[repr(C, packed)]
-struct SetupHeader {
-    setup_sects: u8,
-    root_flags: u16,
-    syssize: u32,
-    ram_size: u16,
-    vid_mode: u16,
-    root_dev: u16,
-    boot_flag: u16,
-    jump: u16,
-    header: u32,          // Magic "HdrS"
-    version: u16,         // Boot protocol version
-    realmode_swtch: u32,
-    start_sys_seg: u16,
-    kernel_version: u16,
-    type_of_loader: u8,
-    loadflags: u8,
-    setup_move_size: u16,
-    code32_start: u32,
-    ramdisk_image: u32,
-    ramdisk_size: u32,
-    bootsect_kludge: u32,
-    heap_end_ptr: u16,
-    ext_loader_ver: u8,
-    ext_loader_type: u8,
-    cmd_line_ptr: u32,
-    initrd_addr_max: u32,
-    kernel_alignment: u32,
-    relocatable_kernel: u8,
-    min_alignment: u8,
-    xloadflags: u16,
-    cmdline_size: u32,
-    hardware_subarch: u32,
-    hardware_subarch_data: u64,
-    payload_offset: u32,
-    payload_length: u32,
-    setup_data: u64,
-    pref_address: u64,
-    init_size: u32,
-    handover_offset: u32,
 }
 
 pub struct KernelImage {
@@ -139,6 +99,11 @@ impl KernelImage {
     
     pub fn handover_offset(&self) -> u32 {
         unsafe { (*self.setup_header).handover_offset }
+    }
+    
+    /// Get pointer to setup header for copying to boot params
+    pub fn setup_header_ptr(&self) -> *const SetupHeader {
+        self.setup_header
     }
     
     /// Get raw setup header bytes for detailed inspection
