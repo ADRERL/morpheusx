@@ -50,46 +50,6 @@ pub unsafe extern "C" fn efi_handoff_64(entry_point: u64, boot_params: u64) -> !
     )
 }
 
-/// Protected mode 32-bit handoff
-/// 
-/// Universal compatibility path.
-/// Assumes we're already in 32-bit protected mode.
-/// 
-/// Entry point: code32_start from setup header
-/// ESI: boot_params pointer
-/// 
-/// Does NOT return.
-#[unsafe(naked)]
-pub unsafe extern "C" fn protected_mode_handoff_32(entry_point: u32, boot_params: u32) -> ! {
-    core::arch::naked_asm!(
-        ".code32",
-        ".intel_syntax noprefix",
-        
-        // Save entry point (EDI) to EBP before we zero registers
-        "mov ebp, edi",
-        
-        // Clear interrupts
-        "cli",
-        
-        // Clear direction flag
-        "cld",
-        
-        // Zero all registers except ESI (boot_params) and EBP (entry)
-        "xor eax, eax",
-        "xor ebx, ebx",
-        "xor ecx, ecx",
-        "xor edx, edx",
-        "xor edi, edi",
-        // EBP holds entry point - don't zero
-        
-        // Jump to kernel (entry point in EBP)
-        "jmp ebp",
-        
-        ".att_syntax",
-        ".code64",
-    )
-}
-
 /// Boot protocol decision logic
 /// 
 /// Determines which handoff method to use based on:
