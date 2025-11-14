@@ -9,7 +9,7 @@ extern "C" {
 
 /// Drop from 64-bit long mode to 32-bit protected mode
 /// 
-/// This is implemented in external assembly (trampoline32.s) to properly
+/// This is implemented in external assembly (trampoline32.asm) to properly
 /// handle the mode transition without compiler interference.
 /// 
 /// Arguments:
@@ -17,8 +17,12 @@ extern "C" {
 /// - boot_params: pointer to Linux boot_params (goes in ESI)
 /// 
 /// Does NOT return - jumps to kernel.
-pub unsafe fn drop_to_protected_mode(entry_point: u32, boot_params: u32) -> ! {
-    drop_to_protected_mode_asm(entry_point, boot_params)
+#[unsafe(naked)]
+pub unsafe extern "C" fn drop_to_protected_mode(entry_point: u32, boot_params: u32) -> ! {
+    core::arch::naked_asm!(
+        "call drop_to_protected_mode_asm",
+        "ud2",  // Should never reach here
+    )
 }
 
 /// Check if kernel supports EFI handover protocol

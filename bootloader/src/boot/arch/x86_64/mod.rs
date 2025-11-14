@@ -9,4 +9,4 @@ pub mod transitions;
 pub mod handoff;
 
 pub use transitions::drop_to_protected_mode;
-pub use handoff::{efi_handoff_64, protected_mode_handoff_32};
+pub use handoff::efi_handoff_64;

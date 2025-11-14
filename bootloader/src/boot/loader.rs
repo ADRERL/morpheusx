@@ -79,7 +79,7 @@ pub unsafe fn boot_linux_kernel(
 
     screen.put_str_at(5, log_y, "Building E820 memory map...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
-    morpheus_core::logger::log("Exiting boot services...");
+    morpheus_core::logger::log("Building E820 memory map...");
     
     // Get memory map before exiting boot services
     let mut map_size: usize = 8192; // Start with reasonable buffer
