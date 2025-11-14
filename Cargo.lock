@@ -76,10 +76,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "morpheus-cli"
-version = "0.1.0"
-
-[[package]]
 name = "morpheus-core"
 version = "0.1.0"
 dependencies = [
@@ -87,10 +83,6 @@ dependencies = [
  "gpt_disk_types",
  "uguid",
 ]
-
-[[package]]
-name = "morpheus-installer"
-version = "0.1.0"
 
 [[package]]
 name = "morpheus-network"
@@ -105,19 +97,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "morpheus-redeco"
-version = "0.1.0"
-
-[[package]]
-name = "morpheus-registry"
-version = "0.1.0"
-
-[[package]]
 name = "morpheus-updater"
-version = "0.1.0"
-
-[[package]]
-name = "morpheus-utils"
 version = "0.1.0"
 
 [[package]]
