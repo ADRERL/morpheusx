@@ -67,6 +67,14 @@ struct SystemTable {
     _stderr: *const (),
     runtime_services: *const (),
     boot_services: *const BootServices,
+    number_of_table_entries: usize,
+    configuration_table: *const ConfigurationTable,
+}
+
+#[repr(C)]
+struct ConfigurationTable {
+    vendor_guid: [u8; 16],
+    vendor_table: *const (),
 }
 
 #[repr(C)]
@@ -80,7 +88,7 @@ struct BootServices {
         allocate_type: usize,
         memory_type: usize,
         pages: usize,
-        memory: u64,
+        memory: *mut u64,
     ) -> usize,
     _free_pages: usize,
     pub get_memory_map: extern "efiapi" fn(

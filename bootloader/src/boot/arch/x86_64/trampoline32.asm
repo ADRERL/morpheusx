@@ -21,6 +21,11 @@ drop_to_protected_mode_asm:
     and eax, 0x7fffffff
     mov cr0, rax
     
+    ; Clear PAE so CR3 semantics match 32-bit mode
+    mov rax, cr4
+    and eax, 0xffffffdf
+    mov cr4, rax
+    
     ; Disable long mode: EFER.LME = 0
     mov ecx, 0xc0000080
     rdmsr
@@ -35,16 +40,16 @@ drop_to_protected_mode_asm:
     lgdt [rsp]                   ; Load GDT from stack
     add rsp, 10                  ; Clean up stack (2 + 8 bytes)
     
-    ; Move arguments to stack (survives mode switch)
+    ; Move arguments to stack (survives mode transition)
     push r15    ; boot_params
     push r14    ; entry_point
     
-    ; Far jump to 32-bit code
-    ; For retfq, stack must be: [RSP]=offset, [RSP+8]=selector
+    ; Far jump to 32-bit code using ljmp
+    ; AT&T syntax: ljmp $selector, $offset
     lea rax, [rel pm32]
-    push rax            ; Push offset FIRST
-    push 0x08           ; Push selector SECOND
-    retfq
+    push rax
+    mov dword [rsp+4], 0x08    ; Write selector after offset
+    jmp far [rsp]              ; Far jump
 
 BITS 32
 pm32:

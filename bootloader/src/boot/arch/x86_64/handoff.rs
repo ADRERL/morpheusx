@@ -12,16 +12,26 @@ use core::arch::asm;
 /// Stays in 64-bit long mode, kernel handles everything.
 /// 
 /// Entry point: startup_64 + handover_offset
-/// RSI: boot_params pointer
+/// RDI: image handle
+/// RSI: system table
+/// RDX: boot_params pointer
 /// 
 /// Does NOT return.
 #[unsafe(naked)]
-pub unsafe extern "C" fn efi_handoff_64(entry_point: u64, boot_params: u64) -> ! {
+pub unsafe extern "C" fn efi_handoff_64(
+    entry_point: u64,
+    image_handle: u64,
+    system_table: u64,
+    boot_params: u64,
+) -> ! {
     core::arch::naked_asm!(
         ".att_syntax",
         
-        // Save entry point (RDI) to R11 before we zero it
-        "mov %rdi, %r11",
+        // Preserve arguments before clobbering
+        "mov %rdi, %r11",     // entry
+        "mov %rsi, %r8",      // image handle
+        "mov %rdx, %r9",      // system table
+        "mov %rcx, %r10",     // boot params
         
         // Clear interrupts
         "cli",
@@ -29,21 +39,23 @@ pub unsafe extern "C" fn efi_handoff_64(entry_point: u64, boot_params: u64) -> !
         // Clear direction flag (required)
         "cld",
         
-        // Zero all registers except RSI (boot_params) and R11 (entry)
+        // Zero caller-saved registers we don't repurpose
         "xor %rax, %rax",
         "xor %rbx, %rbx",
-        "xor %rcx, %rcx",
-        "xor %rdx, %rdx",
-        "xor %rdi, %rdi",
         "xor %rbp, %rbp",
-        "xor %r8, %r8",
-        "xor %r9, %r9",
-        "xor %r10, %r10",
-        // R11 holds entry point - don't zero
         "xor %r12, %r12",
         "xor %r13, %r13",
         "xor %r14, %r14",
         "xor %r15, %r15",
+
+        // Restore registers for kernel entry
+        "mov %r8, %rdi",
+        "mov %r9, %rsi",
+        "mov %r10, %rdx",
+        "xor %rcx, %rcx",
+        "xor %r8, %r8",
+        "xor %r9, %r9",
+        "xor %r10, %r10",
         
         // Jump to kernel (entry point in R11)
         "jmp *%r11",
@@ -87,10 +99,10 @@ impl BootPath {
     }
     
     /// Execute the handoff (does not return)
-    pub unsafe fn execute(self, boot_params: u64) -> ! {
+    pub unsafe fn execute(self, boot_params: u64, image_handle: *mut (), system_table: *mut ()) -> ! {
         match self {
             BootPath::EfiHandoff64 { entry } => {
-                efi_handoff_64(entry, boot_params)
+                efi_handoff_64(entry, image_handle as u64, system_table as u64, boot_params)
             }
             BootPath::ProtectedMode32 { entry } => {
                 // Need to drop to 32-bit first if we're in 64-bit

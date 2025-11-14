@@ -1,9 +1,12 @@
 // Distro launcher - select and boot a kernel
 
 use crate::tui::renderer::{Screen, EFI_GREEN, EFI_LIGHTGREEN, EFI_BLACK, EFI_DARKGREEN, EFI_RED};
-use crate::tui::input::{Keyboard, InputKey};
+use crate::tui::input::Keyboard;
 use alloc::vec::Vec;
 use alloc::string::String;
+
+const MAX_KERNEL_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+const MAX_INITRD_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
 
 pub struct DistroLauncher {
     kernels: Vec<KernelEntry>,
@@ -14,6 +17,7 @@ struct KernelEntry {
     name: String,
     path: String,
     cmdline: String,
+    initrd: Option<String>,
 }
 
 impl DistroLauncher {
@@ -25,16 +29,19 @@ impl DistroLauncher {
                 name: String::from("Fedora 6.17.4"),
                 path: String::from("\\kernels\\vmlinuz"),
                 cmdline: String::from("root=/dev/sda1 ro quiet"),
+                initrd: None,
             },
             KernelEntry {
                 name: String::from("Fedora (verbose)"),
                 path: String::from("\\kernels\\vmlinuz"),
                 cmdline: String::from("root=/dev/sda1 ro debug earlyprintk=serial console=ttyS0"),
+                initrd: None,
             },
             KernelEntry {
                 name: String::from("Test File"),
                 path: String::from("\\kernels\\test.efi"),
                 cmdline: String::from("test"),
+                initrd: None,
             },
         ];
 
@@ -127,7 +134,7 @@ impl DistroLauncher {
                 // Enter - boot selected kernel
                 if key.unicode_char == 0x0D {
                     let kernel = &self.kernels[self.selected_index];
-                    self.boot_kernel(screen, boot_services, system_table, image_handle, kernel);
+                    self.boot_kernel(screen, keyboard, boot_services, system_table, image_handle, kernel);
                     // If we return here, boot failed
                     screen.clear();
                     self.render(screen);
@@ -139,6 +146,7 @@ impl DistroLauncher {
     fn boot_kernel(
         &self,
         screen: &mut Screen,
+        keyboard: &mut Keyboard,
         boot_services: &crate::BootServices,
         system_table: *mut (),
         image_handle: *mut (),
@@ -152,39 +160,64 @@ impl DistroLauncher {
             &alloc::format!("Path: {}", kernel.path), 
             EFI_GREEN, EFI_BLACK);
 
-        // Read kernel from ESP using UEFI File System
-        let kernel_data = match Self::read_kernel_from_esp(
+        screen.put_str_at(5, 14, "Reading kernel image...", EFI_DARKGREEN, EFI_BLACK);
+        morpheus_core::logger::log("kernel read start");
+        let kernel_data = match Self::read_file_from_esp(
             boot_services,
             image_handle,
             &kernel.path,
             screen,
+            MAX_KERNEL_BYTES,
         ) {
-            Ok(data) => data,
-            Err(e) => {
+            Ok(data) => {
                 screen.put_str_at(5, 15, 
-                    &alloc::format!("ERROR: Failed to read kernel: {}", e), 
-                    EFI_RED, EFI_BLACK);
-                screen.put_str_at(5, 17, 
-                    "Press any key to return...", 
-                    EFI_DARKGREEN, EFI_BLACK);
-                
-                let mut kb = Keyboard::new(core::ptr::null_mut());
-                kb.wait_for_key();
+                    &alloc::format!("Kernel loaded: {} bytes", data.len()), 
+                    EFI_GREEN, EFI_BLACK);
+                morpheus_core::logger::log("kernel read ok");
+                data
+            }
+            Err(e) => {
+                let msg = alloc::format!("ERROR: Failed to read kernel: {}", e);
+                Self::await_failure(screen, keyboard, 18, &msg, "kernel read failed");
                 return;
             }
         };
 
-        screen.put_str_at(5, 14, 
-            &alloc::format!("Kernel loaded: {} bytes", kernel_data.len()), 
-            EFI_GREEN, EFI_BLACK);
-        screen.put_str_at(5, 16, 
-            "Booting...", 
-            EFI_LIGHTGREEN, EFI_BLACK);
+        let initrd_data = match &kernel.initrd {
+            Some(path) => {
+                screen.put_str_at(5, 16, &alloc::format!("Initrd: {}", path), EFI_DARKGREEN, EFI_BLACK);
+                morpheus_core::logger::log("initrd read start");
+                match Self::read_file_from_esp(
+                    boot_services,
+                    image_handle,
+                    path,
+                    screen,
+                    MAX_INITRD_BYTES,
+                ) {
+                    Ok(data) => {
+                        screen.put_str_at(5, 17, 
+                            &alloc::format!("Initrd loaded: {} bytes", data.len()), 
+                            EFI_GREEN, EFI_BLACK);
+                        morpheus_core::logger::log("initrd read ok");
+                        Some(data)
+                    }
+                    Err(e) => {
+                        let msg = alloc::format!("ERROR: Failed to read initrd: {}", e);
+                        Self::await_failure(screen, keyboard, 18, &msg, "initrd read failed");
+                        return;
+                    }
+                }
+            }
+            None => {
+                screen.put_str_at(5, 16, "Initrd: none", EFI_DARKGREEN, EFI_BLACK);
+                morpheus_core::logger::log("initrd missing");
+                None
+            }
+        };
 
-        // Clear old logs and track where we are
-        let mut log_line = 18;
-        let initial_log_count = morpheus_core::logger::log_count();
-        
+        screen.put_str_at(5, 18, "Booting...", EFI_LIGHTGREEN, EFI_BLACK);
+
+    // Clear old logs before jumping to the kernel
         // Start boot process in background (it will log as it goes)
         // We can't actually make it background, so we'll just check logs after
         // But for now, let's display logs before the call
@@ -205,24 +238,19 @@ impl DistroLauncher {
                 system_table,
                 image_handle,
                 &kernel_data,
+                initrd_data.as_deref(),
                 &kernel.cmdline,
                 screen, // Pass screen for live logging
             );
         }
-
-        // If we get here, boot failed
-        screen.put_str_at(5, 18, 
-            "ERROR: Boot failed", 
-            EFI_RED, EFI_BLACK);
-        let mut kb = Keyboard::new(core::ptr::null_mut());
-        kb.wait_for_key();
     }
 
-    fn read_kernel_from_esp(
+    fn read_file_from_esp(
         boot_services: &crate::BootServices,
         image_handle: *mut (),
         path: &str,
         screen: &mut Screen,
+        max_size: usize,
     ) -> Result<Vec<u8>, &'static str> {
         use crate::uefi::file_system::*;
         
@@ -253,12 +281,11 @@ impl DistroLauncher {
             
             // Get file size - read a bit to determine size
             // We'll allocate a large buffer and read
-            const MAX_KERNEL_SIZE: usize = 32 * 1024 * 1024; // 32MB max
-            let mut kernel_buffer = alloc::vec![0u8; MAX_KERNEL_SIZE];
-            let mut read_size = MAX_KERNEL_SIZE;
+            let mut file_buffer = alloc::vec![0u8; max_size];
+            let mut read_size = max_size;
             
             // Read file
-            let status = ((*file).read)(file, &mut read_size, kernel_buffer.as_mut_ptr());
+            let status = ((*file).read)(file, &mut read_size, file_buffer.as_mut_ptr());
             
             close_file(file).ok();
             close_file(root).ok();
@@ -268,9 +295,22 @@ impl DistroLauncher {
             }
             
             // Trim buffer to actual size
-            kernel_buffer.truncate(read_size);
+            file_buffer.truncate(read_size);
             
-            Ok(kernel_buffer)
+            Ok(file_buffer)
         }
+    }
+
+    fn await_failure(
+        screen: &mut Screen,
+        keyboard: &mut Keyboard,
+        start_line: usize,
+        message: &str,
+        log_tag: &'static str,
+    ) {
+        morpheus_core::logger::log(log_tag);
+        screen.put_str_at(5, start_line, message, EFI_RED, EFI_BLACK);
+        screen.put_str_at(5, start_line + 2, "Press any key to return...", EFI_DARKGREEN, EFI_BLACK);
+        keyboard.wait_for_key();
     }
 }

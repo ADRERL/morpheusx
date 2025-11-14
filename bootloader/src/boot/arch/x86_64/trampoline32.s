@@ -20,6 +20,11 @@ drop_to_protected_mode_asm:
     andl $0x7fffffff, %eax
     movq %rax, %cr0
     
+    /* Clear PAE bit before leaving long mode */
+    movq %cr4, %rax
+    andl $0xffffffdf, %eax
+    movq %rax, %cr4
+    
     /* Disable long mode: EFER.LME = 0 */
     movl $0xc0000080, %ecx
     rdmsr

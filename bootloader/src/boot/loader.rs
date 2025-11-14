@@ -1,8 +1,31 @@
 // Boot orchestrator - high-level API for booting a kernel
 
-use super::{KernelImage, LinuxBootParams, boot_kernel};
-use super::memory::{allocate_kernel_memory, allocate_boot_params, allocate_cmdline, load_kernel_image};
-use crate::tui::renderer::{Screen, EFI_LIGHTGREEN, EFI_BLACK};
+use core::ptr;
+
+use super::{boot_kernel, KernelImage, LinuxBootParams};
+use super::memory::{
+    allocate_boot_params,
+    allocate_cmdline,
+    allocate_kernel_memory,
+    allocate_low_buffer,
+    exit_boot_services,
+    load_kernel_image,
+    MemoryMap,
+    MemoryError,
+};
+use crate::tui::renderer::{Screen, EFI_BLACK, EFI_LIGHTGREEN};
+
+const LOADER_TYPE_UEFI: u8 = 0x30;
+const EFI_LOADER_SIGNATURE_EL64: u32 = 0x34364C45; // "EL64"
+
+const EFI_ACPI_TABLE_GUID: [u8; 16] = [
+    0x30, 0x2d, 0x9d, 0xeb, 0x88, 0x2d, 0xd3, 0x11,
+    0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d,
+];
+const EFI_ACPI_20_TABLE_GUID: [u8; 16] = [
+    0x71, 0xe8, 0x68, 0x88, 0xf1, 0x04, 0xd3, 0x11,
+    0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81,
+];
 
 pub enum BootError {
     ParseFailed,
@@ -20,186 +43,194 @@ pub unsafe fn boot_linux_kernel(
     system_table: *mut (),
     image_handle: *mut (),
     kernel_data: &[u8],
+    initrd_data: Option<&[u8]>,
     cmdline: &str,
     screen: &mut Screen,
 ) -> ! {
     let mut log_y = 18;
-    
+
     screen.put_str_at(5, log_y, "Parsing kernel...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Parsing kernel...");
-    
-    // Parse kernel image
-    let kernel = match KernelImage::parse(kernel_data) {
-        Ok(k) => k,
-        Err(_) => panic!("Failed to parse kernel"),
-    };
+
+    let kernel = KernelImage::parse(kernel_data).expect("Failed to parse kernel image");
 
     screen.put_str_at(5, log_y, "Allocating kernel memory...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Allocating kernel memory...");
-    
-    // Allocate memory for kernel
-    let kernel_dest = match allocate_kernel_memory(boot_services, &kernel) {
-        Ok(d) => d,
-        Err(_) => panic!("Failed to allocate kernel memory"),
-    };
+
+    let kernel_dest = allocate_kernel_memory(boot_services, &kernel)
+        .expect("Unable to allocate kernel pages");
 
     screen.put_str_at(5, log_y, "Loading kernel to memory...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Loading kernel to memory...");
-    
-    // Load kernel into memory
-    let _ = load_kernel_image(&kernel, kernel_dest);
+
+    load_kernel_image(&kernel, kernel_dest).expect("Kernel copy failed");
 
     screen.put_str_at(5, log_y, "Setting up boot params...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Setting up boot params...");
-    
-    // Allocate boot parameters
-    let boot_params = match allocate_boot_params(boot_services) {
-        Ok(b) => b,
-        Err(_) => panic!("Failed to allocate boot params"),
-    };
 
-    // CRITICAL: Copy the setup header from kernel to boot params
-    // The kernel expects to see its own setup header in boot_params
-    (*boot_params).copy_setup_header(kernel.setup_header_ptr());
-    
-    // Setup boot params
-    (*boot_params).set_loader_type(0xFF); // 0xFF = undefined loader
-    (*boot_params).set_video_mode(); // Basic text mode
-    
-    // Allocate and set command line
+    let boot_params_ptr = allocate_boot_params(boot_services)
+        .expect("Unable to allocate boot params");
+    let boot_params = &mut *boot_params_ptr;
+    *boot_params = LinuxBootParams::new();
+    boot_params.copy_setup_header(kernel.setup_header_ptr());
+    boot_params.set_loader_type(LOADER_TYPE_UEFI);
+    boot_params.set_video_mode();
+
     if !cmdline.is_empty() {
-        if let Ok(cmdline_ptr) = allocate_cmdline(boot_services, cmdline) {
-            (*boot_params).set_cmdline(cmdline_ptr as u32);
+        let limit = kernel.cmdline_limit().saturating_sub(1).max(1);
+        let slice = truncate_cmdline(cmdline, limit as usize);
+        if let Ok(cmdline_ptr) = allocate_cmdline(boot_services, slice) {
+            boot_params.set_cmdline(cmdline_ptr as u64, (slice.len() + 1) as u32);
+        }
+    }
+
+    if let Some(initrd) = initrd_data {
+        if !initrd.is_empty() {
+            let limit = kernel.initrd_addr_max() as u64;
+            let max_addr = if limit == 0 { 0xFFFF_FFFF } else { limit };
+            let initrd_ptr = allocate_low_buffer(boot_services, max_addr, initrd.len())
+                .expect("Failed to allocate initrd region");
+            ptr::copy_nonoverlapping(initrd.as_ptr(), initrd_ptr, initrd.len());
+            boot_params.set_ramdisk(initrd_ptr as u64, initrd.len() as u64);
         }
     }
 
     screen.put_str_at(5, log_y, "Building E820 memory map...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Building E820 memory map...");
-    
-    // Get memory map before exiting boot services
-    let mut map_size: usize = 8192; // Start with reasonable buffer
-    let mut map_key: usize = 0;
-    let mut descriptor_size: usize = 0;
-    let mut descriptor_version: u32 = 0;
-    
-    // Allocate buffer for memory map
-    let mut map_buffer: *mut u8 = core::ptr::null_mut();
-    let alloc_status = (boot_services.allocate_pool)(
-        1, // EfiLoaderData
-        map_size,
-        &mut map_buffer,
+
+    let mut memory_map = MemoryMap::new();
+    memory_map.ensure_snapshot(boot_services).expect("Failed to snapshot memory map");
+    let highest_ram_end = build_e820(boot_params, &memory_map);
+    boot_params.set_alt_mem_k((highest_ram_end / 1024) as u32);
+
+    let systab_ptr = system_table as u64;
+    boot_params.set_efi_info(
+        EFI_LOADER_SIGNATURE_EL64,
+        systab_ptr,
+        memory_map.buffer_ptr() as u64,
+        memory_map.size as u32,
+        memory_map.descriptor_size as u32,
+        memory_map.descriptor_version,
     );
-    
-    // Get memory map
-    let map_status = (boot_services.get_memory_map)(
-        &mut map_size,
-        map_buffer,
-        &mut map_key,
-        &mut descriptor_size,
-        &mut descriptor_version,
-    );
-    
-    // Build E820 memory map from UEFI memory map
-    if alloc_status == 0 && map_status == 0 && !map_buffer.is_null() && descriptor_size > 0 {
-        let num_descriptors = map_size / descriptor_size;
-        let mut current = map_buffer as *const u8;
-        
-        // Safety: limit to reasonable number of entries
-        let count = if num_descriptors > 128 { 128 } else { num_descriptors };
-        
-        for _ in 0..count {
-            // UEFI memory descriptor: type(u32), pad(u32), phys_start(u64), virt_start(u64), num_pages(u64), attribute(u64)
-            let mem_type = unsafe { *(current as *const u32) };
-            let phys_start = unsafe { *(current.add(8) as *const u64) };
-            let num_pages = unsafe { *(current.add(24) as *const u64) };
-            let size = num_pages * 4096;
-            
-            // Convert UEFI type to E820 type
-            // EfiConventionalMemory(7) → E820_RAM(1)
-            // EfiACPIReclaimMemory(9) → E820_ACPI(3)
-            // EfiACPIMemoryNVS(10) → E820_NVS(4)
-            // Everything else → E820_RESERVED(2)
-            let e820_type = match mem_type {
-                7 => 1,  // RAM
-                9 => 3,  // ACPI reclaimable
-                10 => 4, // ACPI NVS
-                _ => 2,  // Reserved
-            };
-            
-            (*boot_params).add_e820_entry(phys_start, size, e820_type);
-            
-            current = unsafe { current.add(descriptor_size) };
-        }
-    }
-    
-    screen.put_str_at(5, log_y, "Built E820 memory map", EFI_LIGHTGREEN, EFI_BLACK);
-    log_y += 1;
-    morpheus_core::logger::log("Built E820 memory map");
-    
-    // DEBUG: Check what boot path we're taking
-    use crate::boot::arch::x86_64::transitions::check_efi_handover_support;
-    let setup_header = kernel.setup_header_bytes();
-    let handover_offset = check_efi_handover_support(setup_header);
-    
-    if let Some(offset) = handover_offset {
-        screen.put_str_at(5, log_y, &alloc::format!("EFI handover: offset={}", offset), EFI_LIGHTGREEN, EFI_BLACK);
-    } else {
-        screen.put_str_at(5, log_y, &alloc::format!("32-bit mode: code32_start={:#x}", kernel.code32_start()), EFI_LIGHTGREEN, EFI_BLACK);
-    }
-    log_y += 1;
-    
-    // Show where we loaded the kernel
-    screen.put_str_at(5, log_y, &alloc::format!("Kernel loaded at: {:#x}", kernel_dest as usize), EFI_LIGHTGREEN, EFI_BLACK);
-    log_y += 1;
-    
-    screen.put_str_at(5, log_y, "Exiting boot services...", EFI_LIGHTGREEN, EFI_BLACK);
-    log_y += 1;
-    
-    // Get fresh memory map right before ExitBootServices
-    // The previous map_key is now stale
-    map_size = 8192;
-    let _ = (boot_services.get_memory_map)(
-        &mut map_size,
-        map_buffer,
-        &mut map_key,
-        &mut descriptor_size,
-        &mut descriptor_version,
-    );
-    
-    // Exit boot services - kernel now owns hardware
-    // This terminates UEFI runtime and gives full control to kernel
-    let exit_status = (boot_services.exit_boot_services)(
-        image_handle,
-        map_key,
-    );
-    
-    // If ExitBootServices fails, retry with fresh map key
-    if exit_status != 0 {
-        let _ = (boot_services.get_memory_map)(
-            &mut map_size,
-            map_buffer,
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        );
-        let _ = (boot_services.exit_boot_services)(
-            image_handle,
-            map_key,
-        );
+
+    if let Some(rsdp) = find_rsdp(system_table as *const RawSystemTable) {
+        boot_params.set_acpi_rsdp(rsdp);
     }
 
+    screen.put_str_at(5, log_y, "Built E820 memory map", EFI_LIGHTGREEN, EFI_BLACK);
+    log_y += 1;
+
+    let efi_supported = kernel.supports_efi_handover_64();
+    if efi_supported {
+        screen.put_str_at(5, log_y, "EFI handover path", EFI_LIGHTGREEN, EFI_BLACK);
+    } else {
+        screen.put_str_at(5, log_y, &alloc::format!("32-bit path via {:#x}", kernel.code32_start()), EFI_LIGHTGREEN, EFI_BLACK);
+    }
+    log_y += 1;
+
+    screen.put_str_at(5, log_y, &alloc::format!("Kernel loaded at: {:#x}", kernel_dest as usize), EFI_LIGHTGREEN, EFI_BLACK);
+    log_y += 1;
+
+    screen.put_str_at(5, log_y, "Exiting boot services...", EFI_LIGHTGREEN, EFI_BLACK);
+    log_y += 1;
+
+    exit_boot_services(boot_services, image_handle, &mut memory_map)
+        .expect("ExitBootServices failed");
+
     screen.put_str_at(5, log_y, "Jumping to kernel...", EFI_LIGHTGREEN, EFI_BLACK);
-    
-    // CRITICAL: After ExitBootServices, we can't use UEFI services anymore
-    // No more logging, no more panics - we're on our own
-    
-    // Jump to kernel (never returns)
-    // kernel still has the setup header from original bzImage
-    // kernel_dest is where we actually loaded the kernel code
-    boot_kernel(&kernel, boot_params, system_table, kernel_dest)
+
+    boot_kernel(&kernel, boot_params_ptr, system_table, image_handle, kernel_dest)
+}
+
+fn truncate_cmdline<'a>(cmdline: &'a str, max_bytes: usize) -> &'a str {
+    if cmdline.len() <= max_bytes {
+        return cmdline;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !cmdline.is_char_boundary(end) {
+        end -= 1;
+    }
+    &cmdline[..end]
+}
+
+fn build_e820(boot_params: &mut LinuxBootParams, memory_map: &MemoryMap) -> u64 {
+    let mut highest_ram_end = 0u64;
+    for descriptor in memory_map.descriptors() {
+        let size = descriptor.number_of_pages * 4096;
+        if size == 0 {
+            continue;
+        }
+        let entry_type = map_uefi_type(descriptor.typ);
+        boot_params.add_e820_entry(descriptor.physical_start, size, entry_type);
+        if entry_type == 1 {
+            highest_ram_end = highest_ram_end.max(descriptor.physical_start + size);
+        }
+    }
+    highest_ram_end
+}
+
+fn map_uefi_type(typ: u32) -> u32 {
+    match typ {
+        1 | 2 | 3 | 4 | 7 => 1,        // RAM
+        9 => 3,                         // ACPI reclaim
+        10 => 4,                        // ACPI NVS
+        8 => 5,                         // Unusable
+        _ => 2,                         // Reserved
+    }
+}
+
+fn find_rsdp(system_table: *const RawSystemTable) -> Option<u64> {
+    if system_table.is_null() {
+        return None;
+    }
+    unsafe {
+        let table = &*system_table;
+        let mut entry = table.configuration_table;
+        for _ in 0..table.number_of_table_entries {
+            if entry.is_null() {
+                break;
+            }
+            let config = &*entry;
+            if guid_equals(&config.vendor_guid, &EFI_ACPI_20_TABLE_GUID)
+                || guid_equals(&config.vendor_guid, &EFI_ACPI_TABLE_GUID)
+            {
+                return Some(config.vendor_table as u64);
+            }
+            entry = entry.add(1);
+        }
+    }
+    None
+}
+
+fn guid_equals(lhs: &[u8; 16], rhs: &[u8; 16]) -> bool {
+    lhs.iter().zip(rhs.iter()).all(|(a, b)| a == b)
+}
+
+#[repr(C)]
+struct RawSystemTable {
+    _header: [u8; 24],
+    _firmware_vendor: *const u16,
+    _firmware_revision: u32,
+    _console_in_handle: *const (),
+    _con_in: *const (),
+    _console_out_handle: *const (),
+    _con_out: *const (),
+    _stderr_handle: *const (),
+    _stderr: *const (),
+    _runtime_services: *const (),
+    _boot_services: *const (),
+    number_of_table_entries: usize,
+    configuration_table: *const RawConfigurationTable,
+}
+
+#[repr(C)]
+struct RawConfigurationTable {
+    vendor_guid: [u8; 16],
+    vendor_table: *const (),
 }
