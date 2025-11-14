@@ -2,6 +2,7 @@
 
 use crate::tui::renderer::{Screen, EFI_GREEN, EFI_LIGHTGREEN, EFI_BLACK, EFI_DARKGREEN, EFI_RED};
 use crate::tui::input::Keyboard;
+use crate::boot::loader::BootError;
 use alloc::vec::Vec;
 use alloc::string::String;
 
@@ -227,21 +228,27 @@ impl DistroLauncher {
         
         // Boot the kernel - this will add logs to the buffer
         // We'll instrument it to show progress
-        unsafe {
+    let boot_result = unsafe {
             // Before calling, clear the screen area for logs
             for i in 18..30 {
                 screen.put_str_at(5, i, "                                                    ", EFI_BLACK, EFI_BLACK);
             }
             
-            let _ = crate::boot::loader::boot_linux_kernel(
+            crate::boot::loader::boot_linux_kernel(
                 boot_services,
                 system_table,
                 image_handle,
                 &kernel_data,
                 initrd_data.as_deref(),
                 &kernel.cmdline,
-                screen, // Pass screen for live logging
-            );
+                screen,
+            )
+        };
+
+    if let Err(error) = boot_result {
+            let detail = Self::describe_boot_error(&error);
+            let msg = alloc::format!("ERROR: {}", detail);
+            Self::await_failure(screen, keyboard, 18, &msg, "kernel boot failed");
         }
     }
 
@@ -312,5 +319,18 @@ impl DistroLauncher {
         screen.put_str_at(5, start_line, message, EFI_RED, EFI_BLACK);
         screen.put_str_at(5, start_line + 2, "Press any key to return...", EFI_DARKGREEN, EFI_BLACK);
         keyboard.wait_for_key();
+    }
+
+    fn describe_boot_error(error: &BootError) -> alloc::string::String {
+        match error {
+            BootError::KernelParse(e) => alloc::format!("Kernel parse failed: {:?}", e),
+            BootError::KernelAllocation(e) => alloc::format!("Kernel allocation failed: {:?}", e),
+            BootError::KernelLoad(e) => alloc::format!("Kernel load failed: {:?}", e),
+            BootError::BootParamsAllocation(e) => alloc::format!("Boot params allocation failed: {:?}", e),
+            BootError::CmdlineAllocation(e) => alloc::format!("Cmdline allocation failed: {:?}", e),
+            BootError::InitrdAllocation(e) => alloc::format!("Initrd allocation failed: {:?}", e),
+            BootError::MemorySnapshot(e) => alloc::format!("Memory map build failed: {:?}", e),
+            BootError::ExitBootServices(e) => alloc::format!("ExitBootServices failed: {:?}", e),
+        }
     }
 }

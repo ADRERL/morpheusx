@@ -10,10 +10,12 @@ const EFI_ALLOCATE_MAX_ADDRESS: usize = 1;
 const EFI_ALLOCATE_ADDRESS: usize = 2;
 const EFI_LOADER_DATA: usize = 2;
 const EFI_SUCCESS: usize = 0;
-const EFI_BUFFER_TOO_SMALL: usize = 5;
-const EFI_INVALID_PARAMETER: usize = 2;
+const EFI_ERROR_BIT: usize = 1usize << (usize::BITS - 1);
+const EFI_BUFFER_TOO_SMALL: usize = EFI_ERROR_BIT | 5;
+const EFI_INVALID_PARAMETER: usize = EFI_ERROR_BIT | 2;
 const LOW_MEMORY_MAX: u64 = 0x0000_FFFF_F000;
 
+#[derive(Debug)]
 pub enum MemoryError {
     AllocationFailed,
     InvalidAddress,
@@ -138,7 +140,10 @@ impl MemoryMap {
         capacity: usize,
     ) -> Result<(), MemoryError> {
         let pages = pages_from_bytes(capacity);
-        let buffer = allocate_pages_max(boot_services, LOW_MEMORY_MAX, pages)?;
+        let buffer = match allocate_pages_max(boot_services, LOW_MEMORY_MAX, pages) {
+            Ok(ptr) => ptr,
+            Err(_) => allocate_pages_any(boot_services, pages)?,
+        };
         self.buffer = buffer;
         self.capacity = pages * PAGE_SIZE;
         self.size = 0;
@@ -195,7 +200,16 @@ pub unsafe fn allocate_kernel_memory(
         LOW_MEMORY_MAX
     };
 
-    allocate_pages_max(boot_services, limit, pages)
+    match allocate_pages_max(boot_services, limit, pages) {
+        Ok(ptr) => Ok(ptr),
+        Err(err) => {
+            if kernel.is_relocatable() {
+                allocate_pages_any(boot_services, pages).or(Err(err))
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 // Allocate memory for boot params (zero page)
@@ -301,6 +315,25 @@ unsafe fn allocate_pages_max(
     let mut addr = max_address;
     let status = (boot_services.allocate_pages)(
         EFI_ALLOCATE_MAX_ADDRESS,
+        EFI_LOADER_DATA,
+        pages,
+        &mut addr,
+    );
+
+    if status == EFI_SUCCESS {
+        Ok(addr as *mut u8)
+    } else {
+        Err(MemoryError::AllocationFailed)
+    }
+}
+
+unsafe fn allocate_pages_any(
+    boot_services: &crate::BootServices,
+    pages: usize,
+) -> Result<*mut u8, MemoryError> {
+    let mut addr = 0u64;
+    let status = (boot_services.allocate_pages)(
+        EFI_ALLOCATE_ANY_PAGES,
         EFI_LOADER_DATA,
         pages,
         &mut addr,

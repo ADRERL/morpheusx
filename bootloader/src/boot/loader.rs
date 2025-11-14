@@ -2,7 +2,7 @@
 
 use core::ptr;
 
-use super::{boot_kernel, KernelImage, LinuxBootParams};
+use super::{boot_kernel, kernel_loader::KernelError, KernelImage, LinuxBootParams};
 use super::memory::{
     allocate_boot_params,
     allocate_cmdline,
@@ -27,10 +27,16 @@ const EFI_ACPI_20_TABLE_GUID: [u8; 16] = [
     0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81,
 ];
 
+#[derive(Debug)]
 pub enum BootError {
-    ParseFailed,
-    MemoryAllocationFailed,
-    LoadFailed,
+    KernelParse(KernelError),
+    KernelAllocation(MemoryError),
+    KernelLoad(MemoryError),
+    BootParamsAllocation(MemoryError),
+    CmdlineAllocation(MemoryError),
+    InitrdAllocation(MemoryError),
+    MemorySnapshot(MemoryError),
+    ExitBootServices(MemoryError),
 }
 
 // Boot a Linux kernel from a bzImage in memory
@@ -46,34 +52,34 @@ pub unsafe fn boot_linux_kernel(
     initrd_data: Option<&[u8]>,
     cmdline: &str,
     screen: &mut Screen,
-) -> ! {
+) -> Result<core::convert::Infallible, BootError> {
     let mut log_y = 18;
 
     screen.put_str_at(5, log_y, "Parsing kernel...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Parsing kernel...");
 
-    let kernel = KernelImage::parse(kernel_data).expect("Failed to parse kernel image");
+    let kernel = KernelImage::parse(kernel_data).map_err(BootError::KernelParse)?;
 
     screen.put_str_at(5, log_y, "Allocating kernel memory...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Allocating kernel memory...");
 
     let kernel_dest = allocate_kernel_memory(boot_services, &kernel)
-        .expect("Unable to allocate kernel pages");
+        .map_err(BootError::KernelAllocation)?;
 
     screen.put_str_at(5, log_y, "Loading kernel to memory...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Loading kernel to memory...");
 
-    load_kernel_image(&kernel, kernel_dest).expect("Kernel copy failed");
+    load_kernel_image(&kernel, kernel_dest).map_err(BootError::KernelLoad)?;
 
     screen.put_str_at(5, log_y, "Setting up boot params...", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
     morpheus_core::logger::log("Setting up boot params...");
 
     let boot_params_ptr = allocate_boot_params(boot_services)
-        .expect("Unable to allocate boot params");
+        .map_err(BootError::BootParamsAllocation)?;
     let boot_params = &mut *boot_params_ptr;
     *boot_params = LinuxBootParams::new();
     boot_params.copy_setup_header(kernel.setup_header_ptr());
@@ -83,9 +89,9 @@ pub unsafe fn boot_linux_kernel(
     if !cmdline.is_empty() {
         let limit = kernel.cmdline_limit().saturating_sub(1).max(1);
         let slice = truncate_cmdline(cmdline, limit as usize);
-        if let Ok(cmdline_ptr) = allocate_cmdline(boot_services, slice) {
-            boot_params.set_cmdline(cmdline_ptr as u64, (slice.len() + 1) as u32);
-        }
+        let cmdline_ptr = allocate_cmdline(boot_services, slice)
+            .map_err(BootError::CmdlineAllocation)?;
+        boot_params.set_cmdline(cmdline_ptr as u64, (slice.len() + 1) as u32);
     }
 
     if let Some(initrd) = initrd_data {
@@ -93,7 +99,7 @@ pub unsafe fn boot_linux_kernel(
             let limit = kernel.initrd_addr_max() as u64;
             let max_addr = if limit == 0 { 0xFFFF_FFFF } else { limit };
             let initrd_ptr = allocate_low_buffer(boot_services, max_addr, initrd.len())
-                .expect("Failed to allocate initrd region");
+                .map_err(BootError::InitrdAllocation)?;
             ptr::copy_nonoverlapping(initrd.as_ptr(), initrd_ptr, initrd.len());
             boot_params.set_ramdisk(initrd_ptr as u64, initrd.len() as u64);
         }
@@ -104,7 +110,7 @@ pub unsafe fn boot_linux_kernel(
     morpheus_core::logger::log("Building E820 memory map...");
 
     let mut memory_map = MemoryMap::new();
-    memory_map.ensure_snapshot(boot_services).expect("Failed to snapshot memory map");
+    memory_map.ensure_snapshot(boot_services).map_err(BootError::MemorySnapshot)?;
     let highest_ram_end = build_e820(boot_params, &memory_map);
     boot_params.set_alt_mem_k((highest_ram_end / 1024) as u32);
 
@@ -125,9 +131,17 @@ pub unsafe fn boot_linux_kernel(
     screen.put_str_at(5, log_y, "Built E820 memory map", EFI_LIGHTGREEN, EFI_BLACK);
     log_y += 1;
 
+    let boot_params_phys = boot_params_ptr as usize;
+    screen.put_str_at(5, log_y, &alloc::format!("Boot params @ {:#x}", boot_params_phys), EFI_LIGHTGREEN, EFI_BLACK);
+    log_y += 1;
+
     let efi_supported = kernel.supports_efi_handover_64();
     if efi_supported {
-        screen.put_str_at(5, log_y, "EFI handover path", EFI_LIGHTGREEN, EFI_BLACK);
+        let handover = kernel.handover_offset() as u64;
+        let entry = kernel_dest as u64 + handover;
+        screen.put_str_at(5, log_y, &alloc::format!("EFI handover path (+{:#x})", handover), EFI_LIGHTGREEN, EFI_BLACK);
+        log_y += 1;
+        screen.put_str_at(5, log_y, &alloc::format!("EFI entry @ {:#x}", entry), EFI_LIGHTGREEN, EFI_BLACK);
     } else {
         screen.put_str_at(5, log_y, &alloc::format!("32-bit path via {:#x}", kernel.code32_start()), EFI_LIGHTGREEN, EFI_BLACK);
     }
@@ -140,7 +154,7 @@ pub unsafe fn boot_linux_kernel(
     log_y += 1;
 
     exit_boot_services(boot_services, image_handle, &mut memory_map)
-        .expect("ExitBootServices failed");
+        .map_err(BootError::ExitBootServices)?;
 
     screen.put_str_at(5, log_y, "Jumping to kernel...", EFI_LIGHTGREEN, EFI_BLACK);
 

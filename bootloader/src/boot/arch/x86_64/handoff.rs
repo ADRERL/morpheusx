@@ -4,17 +4,17 @@
 //! 1. EFI handoff (64-bit, modern kernels)
 //! 2. Protected mode handoff (32-bit, universal compatibility)
 
-use core::arch::asm;
-
 /// EFI 64-bit handoff protocol
 /// 
 /// For kernels that support it (handover_offset != 0).
 /// Stays in 64-bit long mode, kernel handles everything.
 /// 
 /// Entry point: startup_64 + handover_offset
-/// RDI: image handle
-/// RSI: system table
-/// RDX: boot_params pointer
+///
+/// Win64 calling convention expected by the EFI stub:
+/// RCX = image handle
+/// RDX = system table
+/// R8  = boot_params pointer
 /// 
 /// Does NOT return.
 #[unsafe(naked)]
@@ -25,40 +25,24 @@ pub unsafe extern "C" fn efi_handoff_64(
     boot_params: u64,
 ) -> ! {
     core::arch::naked_asm!(
-        ".att_syntax",
-        
-        // Preserve arguments before clobbering
-        "mov %rdi, %r11",     // entry
-        "mov %rsi, %r8",      // image handle
-        "mov %rdx, %r9",      // system table
-        "mov %rcx, %r10",     // boot params
-        
-        // Clear interrupts
-        "cli",
-        
-        // Clear direction flag (required)
-        "cld",
-        
-        // Zero caller-saved registers we don't repurpose
-        "xor %rax, %rax",
-        "xor %rbx, %rbx",
-        "xor %rbp, %rbp",
-        "xor %r12, %r12",
-        "xor %r13, %r13",
-        "xor %r14, %r14",
-        "xor %r15, %r15",
+        "mov r11, rcx",   // stash entry pointer
+        "mov rcx, rdx",   // RCX = image handle
+        "mov rdx, r8",    // RDX = system table
+        "mov r8, r9",     // R8  = boot params
 
-        // Restore registers for kernel entry
-        "mov %r8, %rdi",
-        "mov %r9, %rsi",
-        "mov %r10, %rdx",
-        "xor %rcx, %rcx",
-        "xor %r8, %r8",
-        "xor %r9, %r9",
-        "xor %r10, %r10",
-        
-        // Jump to kernel (entry point in R11)
-        "jmp *%r11",
+        "cli",
+        "cld",
+
+        "xor rax, rax",
+        "xor rbx, rbx",
+        "xor rbp, rbp",
+        "xor r10, r10",
+        "xor r12, r12",
+        "xor r13, r13",
+        "xor r14, r14",
+        "xor r15, r15",
+
+        "jmp r11",
     )
 }
 
