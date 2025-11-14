@@ -3,6 +3,8 @@
 use super::boot_params::SetupHeader;
 
 const KERNEL_MAGIC: u32 = 0x53726448; // "HdrS"
+const XLF_CAN_BE_LOADED_ABOVE_4G: u16 = 1 << 1;
+const XLF_EFI_HANDOVER_64: u16 = 1 << 3;
 
 #[derive(Debug)]
 pub enum KernelError {
@@ -99,6 +101,26 @@ impl KernelImage {
     
     pub fn handover_offset(&self) -> u32 {
         unsafe { (*self.setup_header).handover_offset }
+    }
+
+    pub fn xloadflags(&self) -> u16 {
+        unsafe { (*self.setup_header).xloadflags }
+    }
+
+    pub fn can_load_above_4g(&self) -> bool {
+        (self.xloadflags() & XLF_CAN_BE_LOADED_ABOVE_4G) != 0
+    }
+
+    pub fn supports_efi_handover_64(&self) -> bool {
+        (self.xloadflags() & XLF_EFI_HANDOVER_64) != 0 && self.handover_offset() != 0
+    }
+
+    pub fn initrd_addr_max(&self) -> u32 {
+        unsafe { (*self.setup_header).initrd_addr_max }
+    }
+
+    pub fn cmdline_limit(&self) -> u32 {
+        unsafe { (*self.setup_header).cmdline_size }
     }
     
     /// Get pointer to setup header for copying to boot params

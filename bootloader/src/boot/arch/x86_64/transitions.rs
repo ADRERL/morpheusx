@@ -20,8 +20,9 @@ extern "C" {
 #[unsafe(naked)]
 pub unsafe extern "C" fn drop_to_protected_mode(entry_point: u32, boot_params: u32) -> ! {
     core::arch::naked_asm!(
-        "call drop_to_protected_mode_asm",
-        "ud2",  // Should never reach here
+        "lea rax, [rip + drop_to_protected_mode_asm]",
+        "jmp rax",
+        "ud2",
     )
 }
 
