@@ -1,3 +1,18 @@
+use core::ptr;
+use super::types::{MemoryError, MemoryMap, INITRD_MIN_ADDR};
+use crate::boot::{KernelImage, LinuxBootParams};
+
+const PAGE_SIZE: usize = 4096;
+const EFI_ALLOCATE_ANY_PAGES: usize = 0;
+const EFI_ALLOCATE_MAX_ADDRESS: usize = 1;
+const EFI_ALLOCATE_ADDRESS: usize = 2;
+const EFI_LOADER_DATA: usize = 2;
+const EFI_SUCCESS: usize = 0;
+const EFI_ERROR_BIT: usize = 1usize << (usize::BITS - 1);
+const EFI_BUFFER_TOO_SMALL: usize = EFI_ERROR_BIT | 5;
+const EFI_INVALID_PARAMETER: usize = EFI_ERROR_BIT | 2;
+const LOW_MEMORY_MAX: u64 = 0x0000_FFFF_F000;
+
 pub unsafe fn allocate_kernel_memory(
     boot_services: &crate::BootServices,
     kernel: &KernelImage,
@@ -165,7 +180,7 @@ unsafe fn allocate_at(
     }
 }
 
-unsafe fn allocate_pages_max(
+pub(super) unsafe fn allocate_pages_max(
     boot_services: &crate::BootServices,
     max_address: u64,
     pages: usize,
@@ -196,11 +211,11 @@ unsafe fn allocate_pages_any(
     }
 }
 
-fn pages_from_bytes(bytes: usize) -> usize {
+pub(super) fn pages_from_bytes(bytes: usize) -> usize {
     ((bytes + PAGE_SIZE - 1) / PAGE_SIZE).max(1)
 }
 
-fn align_up(value: u64, alignment: u64) -> u64 {
+pub(super) fn align_up(value: u64, alignment: u64) -> u64 {
     if alignment == 0 {
         return value;
     }

@@ -190,5 +190,3 @@ pub unsafe fn close_file(file: *mut FileProtocol) -> Result<(), ()> {
 
     Ok(())
 }
-
-/// Helper to convert ASCII string to UTF-16 (null-terminated)

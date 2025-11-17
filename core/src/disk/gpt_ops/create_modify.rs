@@ -1,20 +1,11 @@
 // GPT operations using gpt-disk-rs
 
+use super::{mb_to_lba, GptError};
 use crate::disk::partition::{PartitionInfo, PartitionTable, PartitionType};
 use gpt_disk_io::{BlockIo, Disk};
 use gpt_disk_types::{
     guid, BlockSize, GptHeader, GptPartitionEntry, GptPartitionEntryArray, LbaLe, U32Le,
 };
-
-pub enum GptError {
-    IoError,
-    InvalidHeader,
-    NoSpace,
-    PartitionNotFound,
-    OverlappingPartitions,
-    InvalidSize,
-    AlignmentError,
-}
 
 /// Scan disk for GPT and populate partition table
 pub fn create_gpt<B: BlockIo>(block_io: B, num_blocks: u64) -> Result<(), GptError> {
@@ -61,23 +52,6 @@ pub fn create_gpt<B: BlockIo>(block_io: B, num_blocks: u64) -> Result<(), GptErr
     disk.flush().map_err(|_| GptError::IoError)?;
 
     Ok(())
-}
-
-/// Represents a free space region on disk
-#[derive(Copy, Clone, Debug)]
-pub struct FreeRegion {
-    pub start_lba: u64,
-    pub end_lba: u64,
-}
-
-impl FreeRegion {
-    pub fn size_lba(&self) -> u64 {
-        self.end_lba - self.start_lba + 1
-    }
-
-    pub fn size_mb(&self) -> u64 {
-        (self.size_lba() * 512) / (1024 * 1024)
-    }
 }
 
 /// Find all free space regions on disk
@@ -259,5 +233,3 @@ pub fn shrink_partition<B: BlockIo>(
 
     Ok(())
 }
-
-/// Align LBA to 1MB boundary (2048 sectors for 512-byte blocks)

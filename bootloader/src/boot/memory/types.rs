@@ -2,7 +2,8 @@
 
 use core::{marker::PhantomData, ptr};
 
-use super::{KernelImage, LinuxBootParams};
+use crate::boot::{KernelImage, LinuxBootParams};
+use super::allocation::{align_up, pages_from_bytes};
 
 const PAGE_SIZE: usize = 4096;
 const EFI_ALLOCATE_ANY_PAGES: usize = 0;

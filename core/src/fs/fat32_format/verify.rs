@@ -1,15 +1,7 @@
 // FAT32 filesystem formatter
 
+use super::Fat32Error;
 use gpt_disk_io::BlockIo;
-
-#[derive(Debug)]
-pub enum Fat32Error {
-    IoError,
-    PartitionTooSmall,
-    PartitionTooLarge,
-    InvalidBlockSize,
-    NotImplemented,
-}
 
 /// FAT32 Boot Sector (first 512 bytes of partition)
 #[repr(C, packed)]
