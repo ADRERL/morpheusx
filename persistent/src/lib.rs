@@ -1,32 +1,7 @@
-//! Persistent Layer Management
+//! Bootloader self-persistence and data persistence
 //!
-//! This module handles bootloader self-persistence and data persistence.
-//!
-//! # Architecture
-//!
-//! The persistence system is divided into platform-neutral and platform-specific code:
-//!
-//! ## Platform-Neutral (core logic):
-//! - PE/COFF header parsing (DOS, PE, section tables)
-//! - Memory image capture
-//! - Storage backends (ESP, TPM, CMOS, HVRAM)
-//!
-//! ## Platform-Specific (arch modules):
-//! - x86_64: PE+ with IMAGE_REL_BASED_DIR64 relocations
-//! - aarch64: PE+ with ARM64-specific considerations
-//! - armv7: PE with 32-bit relocations (future)
-//!
-//! # Critical Design Decision
-//!
-//! This is the FIRST point where platform-specific code diverges.
-//! The relocation format is identical (PE base relocation table),
-//! but the *semantics* differ:
-//!
-//! - x86_64: Simple pointer fixups
-//! - ARM64: May involve instruction encoding (ADRP/ADD pairs)
-//! - ARM32: Thumb mode considerations
-//!
-//! We use trait-based abstraction to keep the core agnostic.
+//! Platform-neutral: PE parsing, memory capture, storage backends
+//! Platform-specific: Relocation handling (arch modules)
 
 #![no_std]
 #![allow(dead_code)]
@@ -37,13 +12,11 @@
 
 extern crate alloc;
 
-// Public modules
-pub mod capture; // Memory image extraction
+pub mod capture;
 pub mod feedback;
-pub mod pe; // PE/COFF parsing (platform-neutral)
-pub mod storage; // Persistence backends // Visual feedback and logging
+pub mod pe;
+pub mod storage;
 
-// Platform-specific relocation engines
 #[cfg(target_arch = "x86_64")]
 pub mod arch {
     pub mod x86_64;
@@ -53,9 +26,3 @@ pub mod arch {
 pub mod arch {
     pub mod aarch64;
 }
-
-// Future: armv7 support
-// #[cfg(target_arch = "arm")]
-// pub mod arch {
-//     pub mod armv7;
-// }

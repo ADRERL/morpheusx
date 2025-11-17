@@ -1,20 +1,14 @@
-//! Parse embedded relocation metadata from .morpheus section
-//!
-//! UEFI discards .reloc from memory after loading, so we embed a copy
-//! in a custom section that survives in the loaded image.
+//! .morpheus section parser - UEFI discards .reloc after load
 
 use super::{PeError, PeResult};
 
 const MORPHEUS_MAGIC: &[u8; 4] = b"MRPH";
 
-/// Embedded relocation metadata
 pub struct EmbeddedRelocData {
     pub original_rva: u32,
     pub data: &'static [u8],
 }
 
-/// Find and parse .morpheus section containing reloc metadata
-///
 /// # Safety
 /// Caller must ensure image_base points to valid PE in memory
 pub unsafe fn find_embedded_reloc(

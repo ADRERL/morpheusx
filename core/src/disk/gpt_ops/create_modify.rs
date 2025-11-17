@@ -166,9 +166,6 @@ pub fn delete_partition<B: BlockIo>(block_io: B, partition_index: usize) -> Resu
     Ok(())
 }
 
-/// Shrink a partition to a new smaller size
-/// partition_index: GPT entry index (0-127)
-/// new_size_mb: New size in megabytes (must be smaller than current)
 pub fn shrink_partition<B: BlockIo>(
     block_io: B,
     partition_index: usize,

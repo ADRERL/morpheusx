@@ -1,7 +1,3 @@
-//! Morpheus UEFI Bootloader - Hello World
-//!
-//! First UEFI application that displays "Morpheus" on screen.
-
 #![no_std]
 #![no_main]
 #![allow(dead_code)]

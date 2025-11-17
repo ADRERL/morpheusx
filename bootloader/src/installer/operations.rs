@@ -119,8 +119,7 @@ fn verify_written_file<B: gpt_disk_io::BlockIo>(
     Ok(())
 }
 
-/// Install bootloader to ESP using direct FAT32 write
-/// Bypasses UEFI file system protocol (which fails on new partitions)
+/// Install bootloader to ESP via direct FAT32 write (bypasses UEFI FS protocol)
 pub fn install_to_esp(
     bs: &BootServices,
     esp: &EspInfo,

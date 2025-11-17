@@ -1,14 +1,8 @@
-//! UEFI Service Binding Protocol
-//!
-//! Used to create and destroy child protocol instances
+//! UEFI Service Binding Protocol (UEFI Spec 2.10 Section 2.5.9)
 
-/// EFI Handle type
 pub type Handle = *mut core::ffi::c_void;
-
-/// EFI Status type
 pub type Status = usize;
 
-/// Service Binding Protocol function pointers
 #[repr(C)]
 pub struct ServiceBindingProtocol {
     pub create_child: unsafe extern "efiapi" fn(
@@ -21,3 +15,4 @@ pub struct ServiceBindingProtocol {
         child_handle: Handle,
     ) -> Status,
 }
+

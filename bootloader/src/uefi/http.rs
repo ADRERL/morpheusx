@@ -1,11 +1,7 @@
-//! UEFI HTTP Protocol bindings
-//!
-//! Based on UEFI Specification 2.10 Section 28.7 (EFI HTTP Protocol)
+//! UEFI HTTP Protocol (UEFI Spec 2.10 Section 28.7)
 
-/// EFI Status type
 pub type Status = usize;
 
-/// EFI GUID structure
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Guid {
@@ -21,10 +17,8 @@ impl Guid {
     }
 }
 
-/// EFI Event type
 pub type Event = *mut core::ffi::c_void;
 
-/// EFI HTTP Protocol GUID
 pub const HTTP_PROTOCOL_GUID: Guid = Guid::from_values(
     0x7a59b29b,
     0x910b,
@@ -32,7 +26,6 @@ pub const HTTP_PROTOCOL_GUID: Guid = Guid::from_values(
     [0x82, 0x42, 0xa8, 0x5a, 0x0d, 0xf2, 0x5b, 0x5b],
 );
 
-/// EFI HTTP Service Binding Protocol GUID
 pub const HTTP_SERVICE_BINDING_GUID: Guid = Guid::from_values(
     0xbdc8e6af,
     0xd9bc,
@@ -40,7 +33,6 @@ pub const HTTP_SERVICE_BINDING_GUID: Guid = Guid::from_values(
     [0xa7, 0x2a, 0xe0, 0xc4, 0xe7, 0x5d, 0xae, 0x1c],
 );
 
-/// HTTP version
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct HttpVersion {
@@ -53,7 +45,6 @@ impl HttpVersion {
     pub const HTTP_1_1: Self = Self { major: 1, minor: 1 };
 }
 
-/// HTTP method
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethodType {
@@ -69,7 +60,6 @@ pub enum HttpMethodType {
     Max = 9,
 }
 
-/// HTTP status code
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct HttpStatusCode(pub u32);
@@ -90,7 +80,6 @@ impl HttpStatusCode {
     pub const HTTP_STATUS_503_SERVICE_UNAVAILABLE: Self = Self(503);
 }
 
-/// HTTP configuration data
 #[repr(C)]
 pub struct HttpConfigData {
     pub http_version: HttpVersion,
@@ -120,27 +109,23 @@ pub struct HttpIpv6AccessPoint {
     pub local_port: u16,
 }
 
-/// HTTP request data
 #[repr(C)]
 pub struct HttpRequestData {
     pub method: HttpMethodType,
-    pub url: *const u16, // CHAR16*
+    pub url: *const u16,
 }
 
-/// HTTP response data
 #[repr(C)]
 pub struct HttpResponseData {
     pub status_code: HttpStatusCode,
 }
 
-/// HTTP header
 #[repr(C)]
 pub struct HttpHeader {
-    pub field_name: *const u8,  // CHAR8*
-    pub field_value: *const u8, // CHAR8*
+    pub field_name: *const u8,
+    pub field_value: *const u8,
 }
 
-/// HTTP message
 #[repr(C)]
 pub struct HttpMessage {
     pub data: HttpMessageData,
@@ -156,7 +141,6 @@ pub union HttpMessageData {
     pub response: *mut HttpResponseData,
 }
 
-/// HTTP token for async operations
 #[repr(C)]
 pub struct HttpToken {
     pub event: Event,
@@ -164,7 +148,6 @@ pub struct HttpToken {
     pub message: *mut HttpMessage,
 }
 
-/// EFI HTTP Protocol
 #[repr(C)]
 pub struct HttpProtocol {
     pub get_mode_data: unsafe extern "efiapi" fn(
