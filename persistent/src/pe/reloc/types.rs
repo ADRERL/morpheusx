@@ -171,6 +171,6 @@ pub trait RelocationEngine {
     ) -> PeResult<()>;
 
     /// Get the architecture this engine handles
-    fn arch(&self) -> super::PeArch;
+    fn arch(&self) -> super::super::PeArch;
 }
 
