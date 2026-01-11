@@ -95,7 +95,9 @@ This is experimental, not production-hardened, and the network and persistence l
 
 ### Additional Documentation
 
-Can be found in `/docs`.
+- **[Public API Documentation](https://poprdi.github.io/morpheusx/api/)** - Complete public API reference for all workspace crates
+- **[Internal API Documentation](https://poprdi.github.io/morpheusx/internal/)** - Internal implementation details (maintainers only)
+- Project guides and technical notes can be found in `/docs`
 
 ---
 
