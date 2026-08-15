@@ -6,6 +6,12 @@ authors.workspace = true
 license.workspace = true
 description = "Userspace library for MorpheusX — syscall wrappers, I/O, FS API"
 
+# Userland-target lib with a default-on #[panic_handler]: no host test harness
+# (it collides with std's panic_impl under `cargo test`).
+[lib]
+test = false
+doctest = false
+
 [features]
 # `panic-handler` (default) emits the library's own `#[panic_handler]` (see
 # `entry::_panic`). It is default-on so libmorpheus's own binaries keep it. A

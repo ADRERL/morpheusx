@@ -5,6 +5,13 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+# no_main UEFI bin: no host test harness (its #[panic_handler] collides with std's).
+[[bin]]
+name = "morpheus-bootloader"
+path = "src/main.rs"
+test = false
+bench = false
+
 [dependencies]
 # Shared kernel↔userland ABI: storage FS_*/MNT_*/VOLUME_NONE consts for the
 # boot registry population + privileged root mount (spec §7).
