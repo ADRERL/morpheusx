@@ -142,20 +142,7 @@ impl XhciController {
         self.control_nodata(param)
     }
 
-    // GET_PROTOCOL (returns 0 = boot, 1 = report) is parked for now. I had tried
-    // using it to decide boot-vs-report decoding, but real hardware lies (ofcourse) they
-    // answer "boot" via GET_PROTOCOL yet emit report-format data so the mouse
-    // path for now unconditionally forces report protocol and decodes from the report
-    // descriptor. I left in in commented out because we might need it in future
-    // versions of the driver.
-    //
-    // pub unsafe fn get_hid_protocol(&mut self, interface_num: u8) -> Result<u8, XhciError> {
-    //     // bmRequestType=0xA1 (D2H, Class, Interface), bRequest=0x03 (GET_PROTOCOL).
-    //     let buf = self.dma_base + dma::OFF_DESC as u64;
-    //     let param = pack_setup(0xA1, 0x03, 0, interface_num as u16, 1);
-    //     self.control_in(param, buf, 1)?;
-    //     Ok(core::ptr::read_volatile(buf as *const u8))
-    // }
+    // get_protocol unreliable on real hw: devices report boot but emit report-format data
 
     /// Find the first HID boot interface from the already-fetched config descriptor.
     /// Returns a HIDInterface if a boot-class keyboard or mouse is found.

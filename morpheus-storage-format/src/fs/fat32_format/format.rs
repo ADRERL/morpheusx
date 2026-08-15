@@ -85,6 +85,8 @@ impl Fat32BootSector {
     }
 
     fn to_bytes(&self) -> [u8; 512] {
+        // SAFETY: Fat32BootSector is #[repr(C, packed)] POD whose fields sum
+        // to exactly 512 bytes (matches the FAT32 boot-sector spec size).
         unsafe { core::mem::transmute_copy(self) }
     }
 }
@@ -115,6 +117,8 @@ impl FsInfoSector {
     }
 
     fn to_bytes(&self) -> [u8; 512] {
+        // SAFETY: FsInfoSector is #[repr(C, packed)] POD whose fields sum to
+        // exactly 512 bytes (matches the FAT32 FSInfo sector spec size).
         unsafe { core::mem::transmute_copy(self) }
     }
 }

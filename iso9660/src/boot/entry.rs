@@ -27,9 +27,6 @@ impl BootEntry {
     /// Boot indicator value marking the entry as bootable.
     pub const BOOTABLE: u8 = 0x88;
 
-    /// Boot indicator value marking the entry as non-bootable.
-    pub const NOT_BOOTABLE: u8 = 0x00;
-
     /// Whether the entry is flagged bootable.
     pub fn is_bootable(&self) -> bool {
         self.boot_indicator == Self::BOOTABLE

@@ -6,5 +6,6 @@ description = "NIC drivers (Intel e1000e, virtio-net) + PHY + device probe."
 
 [dependencies]
 morpheus-foundation.workspace = true
+morpheus-hal-api.workspace = true
 morpheus-hal-x86_64.workspace = true
 morpheus-virtio.workspace = true

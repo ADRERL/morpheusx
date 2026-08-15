@@ -5,7 +5,7 @@ pub mod entry;
 pub mod table;
 
 pub use entry::{PageFlags, PageTable, PageTableEntry};
-pub use table::{MappedPageSize, PageTableManager, VirtAddr};
+pub use table::{PageTableManager, VirtAddr};
 
 use crate::serial::{log_info, log_warn};
 use crate::sync::SpinLock;

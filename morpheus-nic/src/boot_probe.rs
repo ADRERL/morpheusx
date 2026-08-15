@@ -10,29 +10,24 @@
 //! # Usage
 //!
 //! ```ignore
-//! use morpheus_network::boot::probe::{probe_network_device, ProbeResult};
+//! use morpheus_nic::boot_probe::{probe_and_create_driver, ProbeResult};
 //!
-//! let result = unsafe { probe_network_device(&dma, tsc_freq)? };
+//! let result = unsafe { probe_and_create_driver(&dma, tsc_freq)? };
 //! match result {
 //!     ProbeResult::VirtIO(driver) => { /* use driver */ }
 //!     ProbeResult::Intel(driver) => { /* use driver */ }
-//!     ProbeResult::None => { /* no NIC found */ }
 //! }
 //! ```
 
-use morpheus_virtio::dma::DmaRegion;
-use morpheus_virtio::transport::{PciModernConfig, VirtioTransport};
-// NIC drivers now live in this crate (Wave 3).
 use crate::intel::{
     enable_device, find_intel_nic, validate_mmio_access, E1000eConfig, E1000eDriver, E1000eError,
     IntelNicInfo,
 };
 use crate::virtio::{VirtioConfig, VirtioInitError, VirtioNetDriver};
-// Wave 4 wired PCI config-space accessors and VirtIO capability probing
-// to `morpheus_hal_x86_64::pci::*`. The duplicate shim in `network/src/pci/`
-// has been deleted; `morpheus-hal-x86_64` is the single source of truth.
 use morpheus_hal_x86_64::pci::capability::probe_virtio_caps;
 use morpheus_hal_x86_64::pci::{offset, pci_cfg_read16, pci_cfg_read32, PciAddr};
+use morpheus_virtio::dma::DmaRegion;
+use morpheus_virtio::transport::{PciModernConfig, VirtioTransport};
 
 /// VirtIO vendor ID
 const VIRTIO_VENDOR_ID: u16 = 0x1AF4;
@@ -40,10 +35,6 @@ const VIRTIO_VENDOR_ID: u16 = 0x1AF4;
 const VIRTIO_NET_DEVICE_START: u16 = 0x1000;
 /// VirtIO-net modern device ID
 const VIRTIO_NET_MODERN: u16 = 0x1041;
-
-/// Intel vendor ID
-#[allow(dead_code)]
-const INTEL_VENDOR_ID: u16 = 0x8086;
 
 /// Probe and initialization errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,76 +220,4 @@ pub unsafe fn probe_and_create_driver(
             Ok(ProbeResult::VirtIO(driver))
         },
     }
-}
-
-/// Create Intel e1000e driver from known parameters.
-///
-/// Use this when MMIO base is already known (e.g., from BootHandoff).
-///
-/// # Safety
-/// - `mmio_base` must be valid MMIO address
-/// - DMA region must be properly allocated
-pub unsafe fn create_intel_driver(
-    mmio_base: u64,
-    dma: &DmaRegion,
-    tsc_freq: u64,
-) -> Result<E1000eDriver, E1000eError> {
-    let config = E1000eConfig {
-        dma_cpu_base: dma.cpu_base(),
-        dma_bus_base: dma.bus_base(),
-        rx_queue_size: 32,
-        tx_queue_size: 32,
-        buffer_size: 2048,
-        tsc_freq,
-    };
-
-    E1000eDriver::new(mmio_base, config)
-}
-
-/// Create VirtIO driver from known parameters.
-///
-/// Use this when MMIO base is already known (e.g., from BootHandoff).
-///
-/// # Safety
-/// - `mmio_base` must be valid MMIO address
-/// - DMA region must be properly allocated
-pub unsafe fn create_virtio_driver(
-    mmio_base: u64,
-    dma: &DmaRegion,
-) -> Result<VirtioNetDriver, VirtioInitError> {
-    let config = VirtioConfig {
-        dma_cpu_base: dma.cpu_base(),
-        dma_bus_base: dma.bus_base(),
-        dma_size: dma.size(),
-        queue_size: 32,
-        buffer_size: 2048,
-    };
-
-    VirtioNetDriver::new(mmio_base, config)
-}
-
-/// Detected NIC type for handoff.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum NicType {
-    None = 0,
-    VirtIO = 1,
-    Intel = 2,
-}
-
-/// Detect what type of NIC is present without initializing.
-///
-/// Useful for populating BootHandoff before ExitBootServices.
-pub fn detect_nic_type() -> (NicType, Option<u64>, Option<PciAddr>) {
-    // Check for Intel first (real hardware priority)
-    if let Some(info) = find_intel_nic() {
-        return (NicType::Intel, Some(info.mmio_base), Some(info.pci_addr));
-    }
-
-    // Check for VirtIO
-    if let Some((pci_addr, mmio_base)) = find_virtio_nic() {
-        return (NicType::VirtIO, Some(mmio_base), Some(pci_addr));
-    }
-
-    (NicType::None, None, None)
 }

@@ -575,8 +575,10 @@ fn intel_ahci_pcs_quirk(addr: PciAddr, abar: u64) {
         return;
     }
 
+    // SAFETY: abar is the device's UC-mapped AHCI ABAR (BAR5), just confirmed Intel-vendor above; PI is a fixed, always-readable offset.
     let mut port_map = unsafe { core::ptr::read_volatile((abar + AHCI_PI_OFF) as *const u32) };
     if port_map == 0 {
+        // SAFETY: abar is the device's UC-mapped AHCI ABAR; CAP is a fixed, always-readable offset.
         let cap = unsafe { core::ptr::read_volatile((abar + AHCI_CAP_OFF) as *const u32) };
         let n_ports = ((cap & 0x1F) + 1).min(32);
         port_map = if n_ports >= 32 {
@@ -1051,25 +1053,4 @@ pub unsafe fn create_unified_from_detected_ahci_port(
         },
         _ => Err(UnifiedBlockError::NoDevice),
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum BlockDeviceType {
-    None = 0,
-    VirtIO = 1,
-    Ahci = 2,
-}
-
-/// Detect device type without init, for populating BootHandoff before ExitBootServices.
-pub fn detect_block_device_type() -> (BlockDeviceType, Option<u64>, Option<PciAddr>) {
-    if let Some(info) = find_ahci_controller() {
-        return (BlockDeviceType::Ahci, Some(info.abar), Some(info.pci_addr));
-    }
-
-    if let Some((pci_addr, mmio_base)) = find_virtio_blk() {
-        return (BlockDeviceType::VirtIO, Some(mmio_base), Some(pci_addr));
-    }
-
-    (BlockDeviceType::None, None, None)
 }

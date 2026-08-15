@@ -152,16 +152,13 @@ unsafe fn add_arena(state: &mut HeapState, base: u64) {
     list_push(state, MAX_ORDER, node);
 }
 
-unsafe fn buddy_alloc(state: &mut HeapState, order: usize) -> Option<*mut u8> {
-    let mut found = None;
-    for k in order..=MAX_ORDER {
-        if !state.free_lists[k].is_null() {
-            found = Some(k);
-            break;
-        }
-    }
+/// Smallest order `>= order` with a non-empty free list, if any.
+unsafe fn find_free_order(state: &HeapState, order: usize) -> Option<usize> {
+    (order..=MAX_ORDER).find(|&k| !state.free_lists[k].is_null())
+}
 
-    let found_order = match found {
+unsafe fn buddy_alloc(state: &mut HeapState, order: usize) -> Option<*mut u8> {
+    let found_order = match find_free_order(state, order) {
         Some(k) => k,
         None => {
             let va = crate::mem::mmap_raw(ARENA_PAGES);
@@ -170,14 +167,7 @@ unsafe fn buddy_alloc(state: &mut HeapState, order: usize) -> Option<*mut u8> {
             }
             add_arena(state, va);
 
-            let mut refound = None;
-            for k in order..=MAX_ORDER {
-                if !state.free_lists[k].is_null() {
-                    refound = Some(k);
-                    break;
-                }
-            }
-            refound?
+            find_free_order(state, order)?
         },
     };
 
@@ -264,6 +254,7 @@ unsafe impl GlobalAlloc for BuddyHeap {
 
         let order = layout_to_order(layout);
         HEAP.lock();
+        // SAFETY: access to STATE is serialized by the HEAP SpinLock held across this call.
         #[allow(static_mut_refs)]
         let result = buddy_alloc(&mut STATE, order);
         HEAP.unlock();
@@ -276,6 +267,7 @@ unsafe impl GlobalAlloc for BuddyHeap {
         }
         let order = layout_to_order(layout);
         HEAP.lock();
+        // SAFETY: access to STATE is serialized by the HEAP SpinLock held across this call.
         #[allow(static_mut_refs)]
         buddy_free(&mut STATE, ptr, order);
         HEAP.unlock();

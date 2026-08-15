@@ -67,3 +67,31 @@ jobs:
             -p morpheus-block \
             -p morpheus-nic \
             -p morpheus-net-stack
+
+  boot-smoke:
+    name: uefi build · qemu boot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          targets: x86_64-unknown-uefi
+
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install NASM + QEMU + OVMF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nasm qemu-system-x86 ovmf mtools dosfstools
+
+      - name: Build UEFI image (2-pass reloc embed)
+        run: ./scripts/ci-build-uefi.sh --release
+
+      # TCG (no KVM on hosted runners) — generous timeout. The kernel prints
+      # MORPHEUSX_BOOT_OK once core bring-up (mem/smp/usb/storage probe) is done.
+      - name: QEMU boot smoke
+        run: ./scripts/qemu-e2e.sh target/x86_64-unknown-uefi/release/morpheus-bootloader.efi --timeout 240 --no-kvm

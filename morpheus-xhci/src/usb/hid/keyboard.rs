@@ -14,7 +14,6 @@
 //! The bootloader's `Keyboard::feed_raw` reassembles the sequence.
 
 use crate::controller::{XhciController, XhciError};
-use crate::dma;
 use crate::usb::hid::sink;
 use crate::usb::hid::HIDInterface;
 use morpheus_kernel::sync::SpinLock;
@@ -275,27 +274,4 @@ fn translate_hid_to_ps2_set1(hid_code: u8) -> (Option<u8>, u8) {
 
         _ => (None, 0),
     }
-}
-
-/// Previously called `input::register_keyboard_handler`. After Phase 3.2 the
-/// kernel installs its own keyboard sink via `sink::set_keyboard_sink` at
-/// boot; HID parsers push through that sink. This function is now a no-op
-/// kept for ABI compatibility with the (few) callers that still invoke it.
-pub fn register_handler() {
-    // No-op: kernel-side `input::register_keyboard_handler` is wired by the
-    // kernel during HAL bring-up. HID parser is sink-driven.
-}
-
-/// TODO: real interrupt-in handling. Currently parses whatever's already in OFF_REPORT.
-///
-/// # Safety
-/// `controller` must have valid DMA mappings and the caller must hold exclusive
-/// access; the report region must contain a valid `KeyboardReport`.
-pub unsafe fn handle_interrupt_transfer(
-    controller: &mut XhciController,
-    iface: &HIDInterface,
-) -> Result<(), XhciError> {
-    let report_buf = controller.dma_base + dma::OFF_REPORT as u64;
-    let report = report_buf as *const KeyboardReport;
-    parse_keyboard_report(controller, iface, report)
 }

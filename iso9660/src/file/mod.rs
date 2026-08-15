@@ -1,6 +1,5 @@
 //! File reading helpers.
 
-pub mod extent;
 pub mod metadata;
 pub mod reader;
 

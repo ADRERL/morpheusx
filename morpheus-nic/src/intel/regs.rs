@@ -11,6 +11,7 @@ pub const ICR: u32 = 0x00C0;
 pub const ICS: u32 = 0x00C8;
 pub const IMS: u32 = 0x00D0;
 pub const IMC: u32 = 0x00D8;
+pub const ITR: u32 = 0x00C4;
 
 pub const RCTL: u32 = 0x0100;
 pub const RDBAL: u32 = 0x2800;

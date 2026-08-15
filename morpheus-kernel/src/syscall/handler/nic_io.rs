@@ -119,25 +119,26 @@ pub unsafe fn sys_nic_ctrl(cmd: u64, arg: u64) -> u64 {
 
 use morpheus_foundation::flags::{IOCTL_FIONBIO, IOCTL_FIONREAD, IOCTL_TIOCGWINSZ};
 
+/// Bytes readable on fd 0 across all three stdin backings (pipe / composited
+/// GUI-client input ring / raw stdin). Single source so ioctl and poll agree.
+unsafe fn fd0_available() -> usize {
+    let fd_table = SCHEDULER.current_fd_table_mut();
+    if let Some(desc) = fd_table.get(0) {
+        if desc.flags & O_PIPE_READ != 0 {
+            return pipe::pipe_available(desc.mount_id as u8);
+        }
+    }
+    if is_composited_client() {
+        let proc = SCHEDULER.current_process_mut();
+        return proc.input_head.wrapping_sub(proc.input_tail) as usize;
+    }
+    crate::stdin::available()
+}
+
 pub unsafe fn sys_ioctl(fd: u64, cmd: u64, arg: u64) -> u64 {
     match (fd, cmd) {
         (0, IOCTL_FIONREAD) => {
-            let fd_table = SCHEDULER.current_fd_table_mut();
-            let avail = if let Some(desc) = fd_table.get(0) {
-                if desc.flags & O_PIPE_READ != 0 {
-                    pipe::pipe_available(desc.mount_id as u8)
-                } else if is_composited_client() {
-                    let proc = SCHEDULER.current_process_mut();
-                    proc.input_head.wrapping_sub(proc.input_tail) as usize
-                } else {
-                    crate::stdin::available()
-                }
-            } else if is_composited_client() {
-                let proc = SCHEDULER.current_process_mut();
-                proc.input_head.wrapping_sub(proc.input_tail) as usize
-            } else {
-                crate::stdin::available()
-            };
+            let avail = fd0_available();
             if arg != 0 && validate_user_buf(arg, 4) {
                 core::ptr::write(arg as *mut u32, avail as u32);
             }
@@ -176,8 +177,7 @@ pub unsafe fn sys_ioctl(fd: u64, cmd: u64, arg: u64) -> u64 {
     }
 }
 
-// sys_mount/sys_umount moved to handler/fs.rs (spec §5: they are storage ops,
-// not NIC/ioctl ones, and need the full mount-table dispatch that lives there).
+// sys_mount/sys_umount: see handler/fs.rs (spec §5).
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -189,6 +189,8 @@ struct PollFd {
 
 use morpheus_foundation::flags::{POLLERR, POLLIN, POLLOUT};
 
+const MAX_POLL_FDS: u64 = 1024;
+
 /// fd 0: POLLIN iff stdin has data. fd 1/2: POLLOUT always. fd≥3 (VFS): both.
 pub unsafe fn sys_poll(fds_ptr: u64, nfds: u64, timeout_ms: u64) -> u64 {
     if nfds == 0 {
@@ -196,6 +198,11 @@ pub unsafe fn sys_poll(fds_ptr: u64, nfds: u64, timeout_ms: u64) -> u64 {
             let _ = sys_sleep(timeout_ms);
         }
         return 0;
+    }
+    // bound nfds before the multiply: unbounded nfds wraps u64 and slips a
+    // huge from_raw_parts_mut past validate_user_buf -> oob write
+    if nfds > MAX_POLL_FDS {
+        return EINVAL;
     }
     let size = nfds * core::mem::size_of::<PollFd>() as u64;
     if !validate_user_buf(fds_ptr, size) {
@@ -209,18 +216,7 @@ pub unsafe fn sys_poll(fds_ptr: u64, nfds: u64, timeout_ms: u64) -> u64 {
         pfd.revents = 0;
         match pfd.fd {
             0 => {
-                let fd_table = SCHEDULER.current_fd_table_mut();
-                if let Some(desc) = fd_table.get(0) {
-                    if desc.flags & O_PIPE_READ != 0 {
-                        if pfd.events & POLLIN != 0 && pipe::pipe_available(desc.mount_id as u8) > 0
-                        {
-                            pfd.revents |= POLLIN;
-                            ready += 1;
-                        }
-                        continue;
-                    }
-                }
-                if pfd.events & POLLIN != 0 && crate::stdin::available() > 0 {
+                if pfd.events & POLLIN != 0 && fd0_available() > 0 {
                     pfd.revents |= POLLIN;
                     ready += 1;
                 }
@@ -257,23 +253,9 @@ pub unsafe fn sys_poll(fds_ptr: u64, nfds: u64, timeout_ms: u64) -> u64 {
             remaining_ms = remaining_ms.saturating_sub(chunk);
 
             for pfd in fds.iter_mut() {
-                if pfd.fd == 0 && pfd.events & POLLIN != 0 {
-                    let has_data = {
-                        let fd_table = SCHEDULER.current_fd_table_mut();
-                        if let Some(desc) = fd_table.get(0) {
-                            if desc.flags & O_PIPE_READ != 0 {
-                                pipe::pipe_available(desc.mount_id as u8) > 0
-                            } else {
-                                crate::stdin::available() > 0
-                            }
-                        } else {
-                            crate::stdin::available() > 0
-                        }
-                    };
-                    if has_data {
-                        pfd.revents |= POLLIN;
-                        ready += 1;
-                    }
+                if pfd.fd == 0 && pfd.events & POLLIN != 0 && fd0_available() > 0 {
+                    pfd.revents |= POLLIN;
+                    ready += 1;
                 }
             }
             if ready > 0 {

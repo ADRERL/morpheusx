@@ -35,11 +35,9 @@ static MOUSE_REGISTERED: SpinLock<bool> = SpinLock::new(false);
 
 /// Call once during early boot before any device registers.
 ///
-/// HID-to-input wiring was previously done here by reaching directly into
-/// `usb::hid::sink`; after the kernel/HAL split that's the bootloader's job:
-/// it builds a `KernelHooks` struct with function-pointer sinks pointing at
-/// [`hid_keyboard_sink`] / [`hid_mouse_sink`] (which are public for that
-/// purpose) and hands the hooks to `HalImpl::init`.
+/// HID sinks are wired via `KernelHooks`: the bootloader builds it with
+/// function pointers at [`hid_keyboard_sink`] / [`hid_mouse_sink`] and hands
+/// the hooks to `HalImpl::init`.
 pub fn init() {
     {
         let mut head = KEYBOARD_HEAD.lock();
@@ -136,7 +134,7 @@ pub fn has_mouse() -> bool {
     *MOUSE_REGISTERED.lock()
 }
 
-// Legacy PS/2 thunks — kept so existing call sites compile unchanged.
+// PS/2 handler thunks; existing call sites depend on these signatures.
 
 pub fn ps2_keyboard_handler(scan_code: u8, pressed: bool) {
     let handler = KEYBOARD_HANDLERS.lock();

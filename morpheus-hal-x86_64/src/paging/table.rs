@@ -28,13 +28,6 @@ impl VirtAddr {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MappedPageSize {
-    Size4K,
-    /// 2 MiB huge page (PD entry with PS=1).
-    Size2M,
-}
-
 pub struct PageTableManager {
     /// PML4 physical address (= virtual, identity-mapped).
     pub pml4_phys: u64,
@@ -225,32 +218,6 @@ impl PageTableManager {
 
         let pt = pd_e.phys_addr() as *mut PageTable;
         (*pt).entry_mut(va.pt_idx).clear();
-
-        Self::flush_tlb_page(virt);
-        Ok(())
-    }
-
-    /// # Safety
-    /// `self` must reference a valid, mapped page-table hierarchy and access
-    /// must be serialized (single-threaded init or under the paging lock).
-    pub unsafe fn unmap_2m(&mut self, virt: u64) -> Result<(), &'static str> {
-        let va = VirtAddr::from_u64(virt);
-
-        let pml4 = self.pml4_phys as *mut PageTable;
-        let pml4_e = (*pml4).entry(va.pml4_idx);
-        if !pml4_e.is_present() {
-            return Ok(());
-        }
-
-        let pdpt = pml4_e.phys_addr() as *mut PageTable;
-        let pdpt_e = (*pdpt).entry(va.pdpt_idx);
-        if !pdpt_e.is_present() {
-            return Ok(());
-        }
-
-        let pd = pdpt_e.phys_addr() as *mut PageTable;
-        let e = (*pd).entry_mut(va.pd_idx);
-        e.clear();
 
         Self::flush_tlb_page(virt);
         Ok(())

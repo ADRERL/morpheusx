@@ -118,7 +118,9 @@ unsafe fn publish_readiness(idx: u8, avail_read: usize, avail_write: usize) {
 }
 
 /// # Safety
-/// `idx` must be a valid pipe index.
+/// Caller must hold no lock that would invert order with `PIPE_LOCK`; the
+/// static-mut `PIPE_TABLE` is only ever touched under `PIPE_LOCK`, taken and
+/// released within this fn, so concurrent callers on other cores serialize here.
 pub unsafe fn pipe_write(idx: u8, data: &[u8]) -> usize {
     PIPE_LOCK.lock();
     let mut levels = None;
@@ -141,7 +143,9 @@ pub unsafe fn pipe_write(idx: u8, data: &[u8]) -> usize {
 }
 
 /// # Safety
-/// `idx` must be a valid pipe index.
+/// Caller must hold no lock that would invert order with `PIPE_LOCK`; the
+/// static-mut `PIPE_TABLE` is only ever touched under `PIPE_LOCK`, taken and
+/// released within this fn, so concurrent callers on other cores serialize here.
 pub unsafe fn pipe_read(idx: u8, buf: &mut [u8]) -> usize {
     PIPE_LOCK.lock();
     let mut levels = None;
@@ -163,6 +167,8 @@ pub unsafe fn pipe_read(idx: u8, buf: &mut [u8]) -> usize {
     n
 }
 
+// SAFETY: static-mut `PIPE_TABLE` is only read here under `PIPE_LOCK`, held
+// for the duration of the access below.
 pub unsafe fn pipe_writers(idx: u8) -> u8 {
     PIPE_LOCK.lock();
     let n = PIPE_TABLE.get(idx as usize).map(|p| p.writers).unwrap_or(0);
@@ -170,6 +176,8 @@ pub unsafe fn pipe_writers(idx: u8) -> u8 {
     n
 }
 
+// SAFETY: static-mut `PIPE_TABLE` is only read here under `PIPE_LOCK`, held
+// for the duration of the access below.
 pub unsafe fn pipe_readers(idx: u8) -> u8 {
     PIPE_LOCK.lock();
     let n = PIPE_TABLE.get(idx as usize).map(|p| p.readers).unwrap_or(0);
@@ -178,6 +186,8 @@ pub unsafe fn pipe_readers(idx: u8) -> u8 {
 }
 
 /// Bytes available to read from a pipe (non-blocking check).
+// SAFETY: static-mut `PIPE_TABLE` is only read here under `PIPE_LOCK`, held
+// for the duration of the access below.
 pub unsafe fn pipe_available(idx: u8) -> usize {
     PIPE_LOCK.lock();
     let n = PIPE_TABLE
@@ -190,6 +200,9 @@ pub unsafe fn pipe_available(idx: u8) -> usize {
 }
 
 /// Frees the pipe when both ends are closed.
+// SAFETY: static-mut `PIPE_TABLE` is only mutated here under `PIPE_LOCK`,
+// held for the duration of the access below; readiness is published after
+// unlock to avoid PIPE_LOCK/PROCESS_TABLE_LOCK inversion (see publish_readiness).
 pub unsafe fn pipe_close_reader(idx: u8) {
     PIPE_LOCK.lock();
     let mut last_reader = false;
@@ -212,6 +225,9 @@ pub unsafe fn pipe_close_reader(idx: u8) {
 }
 
 /// Frees the pipe when both ends are closed.
+// SAFETY: static-mut `PIPE_TABLE` is only mutated here under `PIPE_LOCK`,
+// held for the duration of the access below; readiness is published after
+// unlock to avoid PIPE_LOCK/PROCESS_TABLE_LOCK inversion (see publish_readiness).
 pub unsafe fn pipe_close_writer(idx: u8) {
     PIPE_LOCK.lock();
     let mut last_writer = false;
@@ -234,6 +250,8 @@ pub unsafe fn pipe_close_writer(idx: u8) {
 }
 
 /// Bump reader refcount (fd inheritance / dup).
+// SAFETY: static-mut `PIPE_TABLE` is only mutated here under `PIPE_LOCK`,
+// held for the duration of the access below.
 pub unsafe fn pipe_add_reader(idx: u8) {
     PIPE_LOCK.lock();
     if let Some(pipe) = PIPE_TABLE.get_mut(idx as usize) {
@@ -245,6 +263,8 @@ pub unsafe fn pipe_add_reader(idx: u8) {
 }
 
 /// Bump writer refcount (fd inheritance / dup).
+// SAFETY: static-mut `PIPE_TABLE` is only mutated here under `PIPE_LOCK`,
+// held for the duration of the access below.
 pub unsafe fn pipe_add_writer(idx: u8) {
     PIPE_LOCK.lock();
     if let Some(pipe) = PIPE_TABLE.get_mut(idx as usize) {

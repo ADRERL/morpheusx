@@ -51,6 +51,7 @@ impl BufferPool {
 
         let buf = self.buffers[idx].as_mut()?;
         debug_assert!(buf.is_free(), "Allocated buffer must be free");
+        // SAFETY: idx was just removed from free_list, so this buffer has no other owner.
         unsafe {
             buf.mark_allocated();
         }
@@ -68,6 +69,7 @@ impl BufferPool {
                 buf.is_driver_owned(),
                 "Can only free driver-owned buffers (double-free detected)"
             );
+            // SAFETY: is_driver_owned() was just asserted above, so this buffer is not device-owned or already free.
             unsafe {
                 buf.mark_free();
             }

@@ -12,6 +12,7 @@
 //! 0x11000     0x10000     TX Buffers (32 × 2KB)
 //! ```
 
+#[derive(Clone)]
 pub struct DmaRegion {
     pub cpu_ptr: *mut u8,
     pub bus_addr: u64,
@@ -20,10 +21,6 @@ pub struct DmaRegion {
 
 impl DmaRegion {
     pub const MIN_SIZE: usize = 2 * 1024 * 1024;
-
-    pub const DEFAULT_QUEUE_SIZE: usize = 32;
-
-    pub const DEFAULT_BUFFER_SIZE: usize = 2048;
 
     pub const RX_DESC_OFFSET: usize = 0x0000;
     pub const RX_AVAIL_OFFSET: usize = 0x0200;
@@ -58,79 +55,10 @@ impl DmaRegion {
     pub fn size(&self) -> usize {
         self.size
     }
-
-    pub fn rx_desc_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::RX_DESC_OFFSET) }
-    }
-
-    pub fn rx_desc_bus(&self) -> u64 {
-        self.bus_addr + Self::RX_DESC_OFFSET as u64
-    }
-
-    pub fn rx_avail_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::RX_AVAIL_OFFSET) }
-    }
-
-    pub fn rx_avail_bus(&self) -> u64 {
-        self.bus_addr + Self::RX_AVAIL_OFFSET as u64
-    }
-
-    pub fn rx_used_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::RX_USED_OFFSET) }
-    }
-
-    pub fn rx_used_bus(&self) -> u64 {
-        self.bus_addr + Self::RX_USED_OFFSET as u64
-    }
-
-    pub fn tx_desc_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::TX_DESC_OFFSET) }
-    }
-
-    pub fn tx_desc_bus(&self) -> u64 {
-        self.bus_addr + Self::TX_DESC_OFFSET as u64
-    }
-
-    pub fn tx_avail_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::TX_AVAIL_OFFSET) }
-    }
-
-    pub fn tx_avail_bus(&self) -> u64 {
-        self.bus_addr + Self::TX_AVAIL_OFFSET as u64
-    }
-
-    pub fn tx_used_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::TX_USED_OFFSET) }
-    }
-
-    pub fn tx_used_bus(&self) -> u64 {
-        self.bus_addr + Self::TX_USED_OFFSET as u64
-    }
-
-    pub fn rx_buffers_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::RX_BUFFERS_OFFSET) }
-    }
-
-    pub fn rx_buffers_bus(&self) -> u64 {
-        self.bus_addr + Self::RX_BUFFERS_OFFSET as u64
-    }
-
-    pub fn tx_buffers_cpu(&self) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(Self::TX_BUFFERS_OFFSET) }
-    }
-
-    pub fn tx_buffers_bus(&self) -> u64 {
-        self.bus_addr + Self::TX_BUFFERS_OFFSET as u64
-    }
-
-    pub fn buffer_cpu(&self, offset: usize, index: usize, buffer_size: usize) -> *mut u8 {
-        unsafe { self.cpu_ptr.add(offset + index * buffer_size) }
-    }
-
-    pub fn buffer_bus(&self, offset: usize, index: usize, buffer_size: usize) -> u64 {
-        self.bus_addr + (offset + index * buffer_size) as u64
-    }
 }
 
+// SAFETY: DmaRegion wraps a raw pointer to a static, identity-mapped DMA block owned exclusively
+// by the driver that constructed it; this bring-up is single-threaded so no cross-core aliasing occurs.
 unsafe impl Send for DmaRegion {}
+// SAFETY: cpu_ptr/bus_addr/size are read-only fields once constructed; concurrent readers see a consistent view.
 unsafe impl Sync for DmaRegion {}

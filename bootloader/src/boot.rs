@@ -1038,6 +1038,8 @@ unsafe fn stage_e2_enter_userspace(_ctx: &BootContext) -> ! {
 
 /// Spin until keypress. USB HID primary; PS/2 fallback when no USB keyboard detected.
 fn boot_log_gate(keyboard: &mut Keyboard) {
+    // deterministic token for scripts/qemu-e2e.sh: kernel core is fully up here
+    puts("\nMORPHEUSX_BOOT_OK\n");
     puts("\nPress any key to start userspace...");
     let usb_active = morpheus_xhci::usb::runtime::keyboard_present()
         || morpheus_xhci::usb::runtime::mouse_present();

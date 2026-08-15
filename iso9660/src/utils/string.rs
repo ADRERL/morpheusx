@@ -15,17 +15,6 @@ pub fn dchars_to_str(bytes: &[u8]) -> Result<&str, core::str::Utf8Error> {
     core::str::from_utf8(trimmed)
 }
 
-/// Decode a-characters (superset of d-characters plus punctuation).
-pub fn achars_to_str(bytes: &[u8]) -> Result<&str, core::str::Utf8Error> {
-    let trimmed = trim_trailing_spaces(bytes);
-    core::str::from_utf8(trimmed)
-}
-
-/// Permissive Level 1 (8.3) validity check; currently rejects only empty names.
-pub fn is_valid_level1_filename(name: &str) -> bool {
-    !name.is_empty()
-}
-
 /// Drop the `;N` version suffix and any trailing dot left behind.
 /// `"FILE.TXT;1"` → `"FILE.TXT"`, `"FILE.;1"` → `"FILE"`.
 pub fn strip_version(name: &str) -> &str {

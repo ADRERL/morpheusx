@@ -9,7 +9,6 @@ pub const OFF_DCBAA: usize = 0x0000; // 2KB
 pub const OFF_CMD_RING: usize = 0x1000; // 512B
 pub const OFF_EVT_RING: usize = 0x1200; // 512B
 pub const OFF_ERST: usize = 0x1400; // 16B
-pub const OFF_OUT_CTX: usize = 0x2000; // (DEPRECATED — see OUT_CTX_ARRAY)
 pub const OFF_IN_CTX: usize = 0x3000; // 2.5KB
 pub const OFF_XFER_EP0: usize = 0x4000; // 256B
 pub const OFF_XFER_BOUT: usize = 0x4100; // 256B

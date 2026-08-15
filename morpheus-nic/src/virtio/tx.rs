@@ -32,6 +32,7 @@ pub fn transmit(
     buf.as_mut_slice()[..VirtioNetHdr::SIZE].copy_from_slice(hdr.as_bytes());
     buf.as_mut_slice()[VirtioNetHdr::SIZE..total_len].copy_from_slice(frame);
 
+    // SAFETY: buf was just allocated fresh from the pool and filled with header+frame above; it is about to be handed to the device via submit().
     unsafe {
         buf.mark_device_owned();
     }
@@ -67,6 +68,7 @@ pub fn collect_completions(tx_state: &mut VirtqueueState, tx_pool: &mut BufferPo
         match idx {
             Some(buf_idx) => {
                 if let Some(buf) = tx_pool.get_mut(buf_idx) {
+                    // SAFETY: asm_tx::poll_complete just reported this buf_idx completed via the used ring, so the device is done with it.
                     unsafe {
                         buf.mark_driver_owned();
                     }

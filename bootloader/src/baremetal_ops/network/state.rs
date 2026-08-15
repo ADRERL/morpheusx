@@ -1,24 +1,171 @@
 use core::net::Ipv4Addr;
 
+use morpheus_hal_x86_64::sync::{SpinLock, SpinLockGuard};
 use morpheus_net_stack::stack::{DnsQueryHandle, NetInterface, SocketHandle};
 use morpheus_nic::device::UnifiedNetDevice;
-
-pub(super) static mut USER_NET_DRIVER: Option<UnifiedNetDevice> = None;
-pub(super) static mut USER_NET_STACK: Option<NetInterface<UnifiedNetDevice>> = None;
-static mut USER_NET_DMA: Option<morpheus_virtio::dma::DmaRegion> = None;
-static mut USER_NET_TSC_FREQ: u64 = 0;
-static mut USER_NET_HOSTNAME: [u8; 64] = [0; 64];
-static mut USER_NET_HOSTNAME_LEN: usize = 0;
 
 const MAX_TCP_HANDLES: usize = 128;
 const MAX_UDP_HANDLES: usize = 128;
 const MAX_DNS_QUERIES: usize = 64;
-
-static mut USER_TCP_HANDLES: [Option<SocketHandle>; MAX_TCP_HANDLES] = [None; MAX_TCP_HANDLES];
-static mut USER_UDP_HANDLES: [Option<SocketHandle>; MAX_UDP_HANDLES] = [None; MAX_UDP_HANDLES];
-static mut USER_DNS_QUERIES: [Option<DnsQueryHandle>; MAX_DNS_QUERIES] = [None; MAX_DNS_QUERIES];
-static mut USER_DNS_QUERY_STARTS: [u64; MAX_DNS_QUERIES] = [0; MAX_DNS_QUERIES];
 const DNS_QUERY_TTL_MS: u64 = 60_000;
+
+pub(super) struct NetState {
+    pub driver: Option<UnifiedNetDevice>,
+    pub stack: Option<NetInterface<UnifiedNetDevice>>,
+    pub dma: Option<morpheus_virtio::dma::DmaRegion>,
+    pub tsc_freq: u64,
+    pub hostname: [u8; 64],
+    pub hostname_len: usize,
+    pub tcp: [Option<SocketHandle>; MAX_TCP_HANDLES],
+    pub udp: [Option<SocketHandle>; MAX_UDP_HANDLES],
+    pub dns: [Option<DnsQueryHandle>; MAX_DNS_QUERIES],
+    pub dns_starts: [u64; MAX_DNS_QUERIES],
+}
+
+impl NetState {
+    const fn new() -> Self {
+        Self {
+            driver: None,
+            stack: None,
+            dma: None,
+            tsc_freq: 0,
+            hostname: [0; 64],
+            hostname_len: 0,
+            tcp: [None; MAX_TCP_HANDLES],
+            udp: [None; MAX_UDP_HANDLES],
+            dns: [None; MAX_DNS_QUERIES],
+            dns_starts: [0; MAX_DNS_QUERIES],
+        }
+    }
+
+    pub(super) fn device_mut(&mut self) -> Option<&mut UnifiedNetDevice> {
+        if let Some(stack) = self.stack.as_mut() {
+            return Some(stack.device_mut());
+        }
+        self.driver.as_mut()
+    }
+
+    pub(super) fn clear_net_handle_tables(&mut self) {
+        self.tcp.fill(None);
+        self.udp.fill(None);
+        self.dns.fill(None);
+    }
+
+    pub(super) fn alloc_tcp_slot(&mut self, handle: SocketHandle) -> Option<i64> {
+        #[allow(clippy::needless_range_loop)]
+        for idx in 0..MAX_TCP_HANDLES {
+            if self.tcp[idx].is_none() {
+                self.tcp[idx] = Some(handle);
+                return Some(slot_to_user_handle(idx));
+            }
+        }
+        None
+    }
+
+    pub(super) fn get_tcp_slot(&self, handle: i64) -> Option<SocketHandle> {
+        let idx = user_handle_to_slot(handle, MAX_TCP_HANDLES)?;
+        self.tcp[idx]
+    }
+
+    pub(super) fn take_tcp_slot(&mut self, handle: i64) -> Option<SocketHandle> {
+        let idx = user_handle_to_slot(handle, MAX_TCP_HANDLES)?;
+        self.tcp[idx].take()
+    }
+
+    pub(super) fn set_tcp_slot(&mut self, handle: i64, socket: SocketHandle) -> bool {
+        let Some(idx) = user_handle_to_slot(handle, MAX_TCP_HANDLES) else {
+            return false;
+        };
+        self.tcp[idx] = Some(socket);
+        true
+    }
+
+    pub(super) fn tcp_active_count(&self) -> u32 {
+        self.tcp.iter().filter(|h| h.is_some()).count() as u32
+    }
+
+    pub(super) fn alloc_udp_slot(&mut self, handle: SocketHandle) -> Option<i64> {
+        #[allow(clippy::needless_range_loop)]
+        for idx in 0..MAX_UDP_HANDLES {
+            if self.udp[idx].is_none() {
+                self.udp[idx] = Some(handle);
+                return Some(slot_to_user_handle(idx));
+            }
+        }
+        None
+    }
+
+    pub(super) fn get_udp_slot(&self, handle: i64) -> Option<SocketHandle> {
+        let idx = user_handle_to_slot(handle, MAX_UDP_HANDLES)?;
+        self.udp[idx]
+    }
+
+    pub(super) fn take_udp_slot(&mut self, handle: i64) -> Option<SocketHandle> {
+        let idx = user_handle_to_slot(handle, MAX_UDP_HANDLES)?;
+        self.udp[idx].take()
+    }
+
+    pub(super) fn alloc_dns_query_slot(
+        &mut self,
+        handle: DnsQueryHandle,
+        now_ms: u64,
+    ) -> Option<i64> {
+        #[allow(clippy::needless_range_loop)]
+        for idx in 0..MAX_DNS_QUERIES {
+            if self.dns[idx].is_none() {
+                self.dns[idx] = Some(handle);
+                self.dns_starts[idx] = now_ms;
+                return Some(slot_to_user_handle(idx));
+            }
+        }
+        None
+    }
+
+    pub(super) fn get_dns_query_slot(&self, handle: i64) -> Option<DnsQueryHandle> {
+        let idx = user_handle_to_slot(handle, MAX_DNS_QUERIES)?;
+        self.dns[idx]
+    }
+
+    pub(super) fn clear_dns_query_slot(&mut self, handle: i64) {
+        if let Some(idx) = user_handle_to_slot(handle, MAX_DNS_QUERIES) {
+            self.dns[idx] = None;
+        }
+    }
+
+    pub(super) fn take_dns_query_slot(&mut self, handle: i64) -> Option<DnsQueryHandle> {
+        let idx = user_handle_to_slot(handle, MAX_DNS_QUERIES)?;
+        self.dns[idx].take()
+    }
+
+    /// # Safety
+    /// `name` must be a valid pointer to at least `len` readable bytes.
+    pub(super) unsafe fn set_hostname(&mut self, name: *const u8, len: usize) -> i64 {
+        if name.is_null() || len == 0 || len > 63 {
+            return -1;
+        }
+        self.hostname_len = len;
+        core::ptr::copy_nonoverlapping(name, self.hostname.as_mut_ptr(), len);
+        self.hostname[len] = 0;
+        0
+    }
+
+    pub(super) fn write_hostname_to(
+        &self,
+        out: &mut morpheus_kernel::syscall::handler::NetConfigInfo,
+    ) {
+        if self.hostname_len > 0 {
+            let n = self.hostname_len.min(63);
+            out.hostname[..n].copy_from_slice(&self.hostname[..n]);
+            out.hostname[n] = 0;
+        }
+    }
+}
+
+static NET: SpinLock<NetState> = SpinLock::new(NetState::new());
+
+pub(super) fn net() -> SpinLockGuard<'static, NetState> {
+    NET.lock()
+}
 
 #[inline(always)]
 pub(super) fn ip_from_nbo(ip: u32) -> Ipv4Addr {
@@ -49,161 +196,23 @@ fn user_handle_to_slot(handle: i64, max: usize) -> Option<usize> {
     }
 }
 
-pub(super) unsafe fn set_activation_context(dma: morpheus_virtio::dma::DmaRegion, tsc_freq: u64) {
-    USER_NET_DMA = Some(dma);
-    USER_NET_TSC_FREQ = tsc_freq;
-}
-
-pub(super) unsafe fn activation_context() -> Option<(&'static morpheus_virtio::dma::DmaRegion, u64)>
-{
-    let dma = USER_NET_DMA.as_ref()?;
-    Some((dma, USER_NET_TSC_FREQ))
-}
-
-pub(super) unsafe fn user_net_driver_mut() -> Option<&'static mut UnifiedNetDevice> {
-    if let Some(stack) = USER_NET_STACK.as_mut() {
-        return Some(stack.device_mut());
-    }
-    USER_NET_DRIVER.as_mut()
-}
-
-pub(super) unsafe fn user_net_stack_mut() -> Option<&'static mut NetInterface<UnifiedNetDevice>> {
-    USER_NET_STACK.as_mut()
-}
-
-pub(super) unsafe fn set_stack(stack: NetInterface<UnifiedNetDevice>) {
-    USER_NET_STACK = Some(stack);
-    USER_NET_DRIVER = None;
-}
-
-pub(super) unsafe fn has_driver() -> bool {
-    USER_NET_DRIVER.is_some()
-}
-
-pub(super) unsafe fn clear_net_handle_tables() {
-    USER_TCP_HANDLES.fill(None);
-    USER_UDP_HANDLES.fill(None);
-    USER_DNS_QUERIES.fill(None);
-}
-
-pub(super) unsafe fn alloc_tcp_slot(handle: SocketHandle) -> Option<i64> {
-    // Index-based access avoids taking a `&mut` to the mutable static (static_mut_refs).
-    #[allow(clippy::needless_range_loop)]
-    for idx in 0..MAX_TCP_HANDLES {
-        if USER_TCP_HANDLES[idx].is_none() {
-            USER_TCP_HANDLES[idx] = Some(handle);
-            return Some(slot_to_user_handle(idx));
-        }
-    }
-    None
-}
-
-pub(super) unsafe fn get_tcp_slot(handle: i64) -> Option<SocketHandle> {
-    let idx = user_handle_to_slot(handle, MAX_TCP_HANDLES)?;
-    USER_TCP_HANDLES[idx]
-}
-
-pub(super) unsafe fn take_tcp_slot(handle: i64) -> Option<SocketHandle> {
-    let idx = user_handle_to_slot(handle, MAX_TCP_HANDLES)?;
-    USER_TCP_HANDLES[idx].take()
-}
-
-pub(super) unsafe fn set_tcp_slot(handle: i64, socket: SocketHandle) -> bool {
-    let Some(idx) = user_handle_to_slot(handle, MAX_TCP_HANDLES) else {
-        return false;
-    };
-    USER_TCP_HANDLES[idx] = Some(socket);
-    true
-}
-
-pub(super) unsafe fn tcp_active_count() -> u32 {
-    USER_TCP_HANDLES.iter().filter(|h| h.is_some()).count() as u32
-}
-
-pub(super) unsafe fn alloc_udp_slot(handle: SocketHandle) -> Option<i64> {
-    // Index-based access avoids taking a `&mut` to the mutable static (static_mut_refs).
-    #[allow(clippy::needless_range_loop)]
-    for idx in 0..MAX_UDP_HANDLES {
-        if USER_UDP_HANDLES[idx].is_none() {
-            USER_UDP_HANDLES[idx] = Some(handle);
-            return Some(slot_to_user_handle(idx));
-        }
-    }
-    None
-}
-
-pub(super) unsafe fn get_udp_slot(handle: i64) -> Option<SocketHandle> {
-    let idx = user_handle_to_slot(handle, MAX_UDP_HANDLES)?;
-    USER_UDP_HANDLES[idx]
-}
-
-pub(super) unsafe fn take_udp_slot(handle: i64) -> Option<SocketHandle> {
-    let idx = user_handle_to_slot(handle, MAX_UDP_HANDLES)?;
-    USER_UDP_HANDLES[idx].take()
-}
-
-pub(super) unsafe fn alloc_dns_query_slot(handle: DnsQueryHandle, now_ms: u64) -> Option<i64> {
-    // Index-based access avoids taking a `&mut` to the mutable static (static_mut_refs).
-    #[allow(clippy::needless_range_loop)]
-    for idx in 0..MAX_DNS_QUERIES {
-        if USER_DNS_QUERIES[idx].is_none() {
-            USER_DNS_QUERIES[idx] = Some(handle);
-            USER_DNS_QUERY_STARTS[idx] = now_ms;
-            return Some(slot_to_user_handle(idx));
-        }
-    }
-    None
-}
-
-pub(super) unsafe fn get_dns_query_slot(handle: i64) -> Option<DnsQueryHandle> {
-    let idx = user_handle_to_slot(handle, MAX_DNS_QUERIES)?;
-    USER_DNS_QUERIES[idx]
-}
-
-pub(super) unsafe fn clear_dns_query_slot(handle: i64) {
-    if let Some(idx) = user_handle_to_slot(handle, MAX_DNS_QUERIES) {
-        USER_DNS_QUERIES[idx] = None;
-    }
-}
-
-pub(super) unsafe fn take_dns_query_slot(handle: i64) -> Option<DnsQueryHandle> {
-    let idx = user_handle_to_slot(handle, MAX_DNS_QUERIES)?;
-    USER_DNS_QUERIES[idx].take()
-}
-
 /// Reap pending DNS slots older than `DNS_QUERY_TTL_MS`, cancelling the smoltcp
 /// query so a lost DNS_CANCEL can't wedge the (single) DNS query slot forever.
-pub(super) unsafe fn reap_expired_dns_queries(
+pub(super) fn reap_expired_dns_queries(
     stack: &mut NetInterface<UnifiedNetDevice>,
+    dns: &mut [Option<DnsQueryHandle>; MAX_DNS_QUERIES],
+    dns_starts: &mut [u64; MAX_DNS_QUERIES],
     now_ms: u64,
 ) {
     #[allow(clippy::needless_range_loop)]
     for idx in 0..MAX_DNS_QUERIES {
-        if let Some(handle) = USER_DNS_QUERIES[idx] {
-            if now_ms.saturating_sub(USER_DNS_QUERY_STARTS[idx]) >= DNS_QUERY_TTL_MS {
+        if let Some(handle) = dns[idx] {
+            if now_ms.saturating_sub(dns_starts[idx]) >= DNS_QUERY_TTL_MS {
                 // Slot is live (see net-stack invariant), so cancel is panic-safe.
                 stack.cancel_dns_query(handle);
-                USER_DNS_QUERIES[idx] = None;
+                dns[idx] = None;
             }
         }
-    }
-}
-
-pub(super) unsafe fn set_hostname(name: *const u8, len: usize) -> i64 {
-    if name.is_null() || len == 0 || len > 63 {
-        return -1;
-    }
-    USER_NET_HOSTNAME_LEN = len;
-    core::ptr::copy_nonoverlapping(name, USER_NET_HOSTNAME.as_mut_ptr(), len);
-    USER_NET_HOSTNAME[len] = 0;
-    0
-}
-
-pub(super) unsafe fn write_hostname_to(out: &mut morpheus_kernel::syscall::handler::NetConfigInfo) {
-    if USER_NET_HOSTNAME_LEN > 0 {
-        let n = USER_NET_HOSTNAME_LEN.min(63);
-        out.hostname[..n].copy_from_slice(&USER_NET_HOSTNAME[..n]);
-        out.hostname[n] = 0;
     }
 }
 

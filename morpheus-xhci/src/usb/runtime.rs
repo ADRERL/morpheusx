@@ -83,6 +83,9 @@ fn iface_of(dev: &UsbInputDevice) -> HIDInterface {
 /// EP State 2 = Halted, 4 = Error (xHCI 4.8.3). Both ignore doorbell rings
 /// until RESET_ENDPOINT clears them — real LS keyboards/mice often land here
 /// right after CONFIGURE_ENDPOINT.
+// SAFETY: `controller` and `dev.slot_id` are valid for the lifetime of the
+// runtime-install contract (single controller instance, slot addressed
+// during enumeration and never torn down while polling runs).
 unsafe fn ep_halted(controller: &XhciController, dev: &UsbInputDevice) -> bool {
     let cs = controller.ctx_size as u64;
     let out_ctx = controller.dma_base + dma::slot_out_ctx_offset(dev.slot_id) as u64;
@@ -91,6 +94,8 @@ unsafe fn ep_halted(controller: &XhciController, dev: &UsbInputDevice) -> bool {
     st == 2 || st == 4
 }
 
+// SAFETY: `controller` is the single runtime-installed controller instance
+// and `buf` is a fixed DMA-region offset owned by the caller's ring choice.
 unsafe fn ring_enqueue(controller: &mut XhciController, mouse: bool, buf: u64, mpkt: u32) {
     if mouse {
         controller.mouse_ring.enqueue(buf, mpkt, ARM_FLAGS);
@@ -100,6 +105,8 @@ unsafe fn ring_enqueue(controller: &mut XhciController, mouse: bool, buf: u64, m
 }
 
 /// Reset a halted endpoint if needed, then enqueue one interrupt-IN transfer.
+// SAFETY: `controller`/`dev` validity comes from the runtime-install
+// contract; this runs on the single-threaded polling path only.
 unsafe fn arm_device(controller: &mut XhciController, dev: &UsbInputDevice, mouse: bool) {
     let dci = dci_of(dev);
     let (ring_off, report_off) = rings_of(mouse);

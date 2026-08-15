@@ -9,7 +9,6 @@ use core::marker::PhantomData;
 use crate::raw::*;
 
 const DEFAULT_STACK_PAGES: u64 = 16;
-const DEFAULT_STACK_SIZE: u64 = DEFAULT_STACK_PAGES * 4096;
 
 /// Set this thread's TLS base (x86 FS base) — the `arch_prctl(ARCH_SET_FS)`
 /// primitive. `tp` must point at the thread's variant-II TCB (FS-relative TLS
@@ -98,36 +97,7 @@ pub fn spawn<F>(f: F) -> Result<JoinHandle<()>, u64>
 where
     F: FnOnce() + Send + 'static,
 {
-    let stack_base = crate::mem::mmap_raw(DEFAULT_STACK_PAGES);
-    if crate::is_error(stack_base) {
-        return Err(stack_base);
-    }
-
-    // Stack grows down; top must be 16-byte aligned per SysV ABI.
-    let stack_top = (stack_base + DEFAULT_STACK_SIZE) & !0xF;
-
-    // Double-box: inner for type erasure, outer for stable thin pointer.
-    let closure: Box<Box<dyn FnOnce()>> = Box::new(Box::new(f));
-    let arg = Box::into_raw(closure) as u64;
-
-    let entry = thread_trampoline as *const () as u64;
-    // tls_base=0: the trampoline installs its own variant-II TLS. ctid_ptr=0:
-    // this handle joins via SYS_THREAD_JOIN (the ctid futex slot is for std).
-    // flags=0: not detached at creation (drop-detach handles leak-free drop).
-    let ret = unsafe { syscall6(SYS_THREAD_CREATE, entry, stack_top, arg, 0, 0, 0) };
-
-    if crate::is_error(ret) {
-        unsafe {
-            let _ = Box::from_raw(arg as *mut Box<dyn FnOnce()>);
-            syscall2(SYS_MUNMAP, stack_base, DEFAULT_STACK_PAGES);
-        }
-        return Err(ret);
-    }
-
-    Ok(JoinHandle {
-        tid: ret as u32,
-        _marker: PhantomData,
-    })
+    spawn_with_stack(f, DEFAULT_STACK_PAGES)
 }
 
 pub struct Builder {

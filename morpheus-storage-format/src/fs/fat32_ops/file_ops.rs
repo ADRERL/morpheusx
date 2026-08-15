@@ -11,6 +11,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 /// Pre-EBS temp buffer via UEFI allocate_pages.
+// SAFETY: caller must pass a matching allocate/free pair from the same live
+// UEFI boot-services table; allocate_pages returns a page-aligned region of
+// at least `size` bytes (bytes_to_pages rounds up), so the slice below is in bounds.
 unsafe fn with_temp_buffer<F>(
     size: usize,
     boot_services_alloc: uefi_alloc::AllocatePages,
@@ -159,6 +162,8 @@ pub fn write_file_in_directory_with_progress_uefi<B: BlockIo>(
         let chunk_size = data_end - data_offset;
 
         if let (Some(alloc_fn), Some(free_fn)) = (boot_services_alloc, boot_services_free) {
+            // SAFETY: alloc_fn/free_fn are Some together, i.e. both came from
+            // the same live pre-EBS UEFI boot-services table passed by the caller.
             unsafe {
                 with_temp_buffer(cluster_size, alloc_fn, free_fn, |cluster_data| {
                     write_cluster_data(
@@ -236,6 +241,10 @@ pub fn read_file<B: BlockIo>(
                 )
                 .map_err(|_| Fat32Error::IoError)?;
 
+            // SAFETY: DirEntry is #[repr(C, packed)] POD (32 bytes); sector_data
+            // is a freshly read, fully initialized SECTOR_SIZE array and
+            // entries_per_sector = SECTOR_SIZE / size_of::<DirEntry>(), so the
+            // slice stays within sector_data's bounds.
             let entries = unsafe {
                 core::slice::from_raw_parts(
                     sector_data.as_ptr() as *const DirEntry,
@@ -353,6 +362,10 @@ pub fn file_exists<B: BlockIo>(
                 )
                 .map_err(|_| Fat32Error::IoError)?;
 
+            // SAFETY: DirEntry is #[repr(C, packed)] POD (32 bytes); sector_data
+            // is a freshly read, fully initialized SECTOR_SIZE array and
+            // entries_per_sector = SECTOR_SIZE / size_of::<DirEntry>(), so the
+            // slice stays within sector_data's bounds.
             let entries = unsafe {
                 core::slice::from_raw_parts(
                     sector_data.as_ptr() as *const DirEntry,

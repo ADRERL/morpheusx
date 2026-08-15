@@ -43,6 +43,7 @@ pub(super) fn push_keyboard_byte(byte: u8, pressed: bool) {
 
 #[inline]
 pub(super) fn push_mouse(dx: i16, dy: i16, buttons: u8, wheel: i8) {
+    // SAFETY: hook is `fn`, install is single-threaded, read is value-copy.
     unsafe {
         if let Some(h) = MOUSE_SINK {
             h(dx, dy, buttons, wheel);

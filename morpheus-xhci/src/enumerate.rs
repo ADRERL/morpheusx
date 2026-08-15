@@ -34,10 +34,6 @@ use crate::regs::*;
 struct HubParent {
     slot_id: u8,
     port_num: u8,
-    /// Number of 4-bit groups already consumed in the route string by hubs
-    /// above this one. The new port enters the route string at this offset.
-    #[allow(dead_code)]
-    route_depth_bits: u8,
 }
 
 /// USB device handle after enumeration.
@@ -392,7 +388,6 @@ unsafe fn enumerate_hub_downstream(
         let new_parent = HubParent {
             slot_id: hub_slot,
             port_num: down_port,
-            route_depth_bits: new_depth,
         };
 
         if let Err(_e) = enumerate_device(

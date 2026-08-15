@@ -522,11 +522,6 @@ impl XhciController {
             0,
             256,
         );
-        core::ptr::write_bytes(
-            (self.dma_base + dma::OFF_OUT_CTX as u64) as *mut u8,
-            0,
-            2048,
-        );
         core::ptr::write_bytes((self.dma_base + dma::OFF_IN_CTX as u64) as *mut u8, 0, 2560);
         self.ep0.reset();
         self.bout.reset();

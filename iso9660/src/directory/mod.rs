@@ -2,7 +2,6 @@
 
 pub mod flags;
 pub mod iterator;
-pub mod path_table;
 pub mod record;
 
 use crate::error::{Iso9660Error, Result};
@@ -10,22 +9,6 @@ use crate::types::{FileEntry, VolumeInfo, MAX_DIRECTORY_DEPTH};
 use alloc::string::String;
 use alloc::vec::Vec;
 use gpt_disk_io::BlockIo;
-
-#[cfg(feature = "trace")]
-#[allow(dead_code)]
-extern "C" {
-    fn morpheus_log(msg: *const u8, len: usize);
-}
-
-#[cfg(feature = "trace")]
-#[allow(dead_code)]
-fn trace(msg: &str) {
-    unsafe { morpheus_log(msg.as_ptr(), msg.len()) };
-}
-
-#[cfg(not(feature = "trace"))]
-#[allow(dead_code)]
-fn trace(_msg: &str) {}
 
 /// Resolve a `/`-separated, case-insensitive path to a `FileEntry`.
 /// An empty path or "/" returns a synthesized root entry.

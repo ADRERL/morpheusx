@@ -24,6 +24,7 @@ pub fn receive(
     let buf = rx_pool
         .get_mut(result.buffer_idx)
         .ok_or(RxError::DeviceError)?;
+    // SAFETY: asm_rx::poll just reported this buffer_idx completed via the used ring, so the device is done with it.
     unsafe {
         buf.mark_driver_owned();
     }
@@ -57,6 +58,7 @@ fn resubmit_buffer(rx_state: &mut VirtqueueState, rx_pool: &mut BufferPool, buf_
     use morpheus_virtio::asm::{notify, rx as asm_rx};
 
     if let Some(buf) = rx_pool.get_mut(buf_idx) {
+        // SAFETY: buf was just reclaimed as driver-owned above; contents are about to be handed to the device via submit().
         unsafe {
             buf.mark_device_owned();
         }
@@ -85,6 +87,7 @@ pub fn refill_queue(rx_state: &mut VirtqueueState, rx_pool: &mut BufferPool) {
         let buf_idx = buf.index();
         let capacity = buf.capacity() as u16;
 
+        // SAFETY: buf was just allocated fresh from the pool (DriverOwned), and is about to be handed to the device via submit().
         unsafe {
             buf.mark_device_owned();
         }
@@ -120,6 +123,7 @@ pub fn prefill_queue(
         let buf_idx = buf.index();
         let capacity = buf.capacity() as u16;
 
+        // SAFETY: buf was just allocated fresh from the pool (DriverOwned), and is about to be handed to the device via submit().
         unsafe {
             buf.mark_device_owned();
         }

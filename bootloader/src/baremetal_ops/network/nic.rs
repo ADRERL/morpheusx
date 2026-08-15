@@ -60,7 +60,8 @@ pub(super) unsafe fn log_pci_network_candidates() {
 }
 
 pub(super) unsafe fn user_net_tx(frame: *const u8, len: usize) -> i64 {
-    let Some(driver) = state::user_net_driver_mut() else {
+    let mut ns = state::net();
+    let Some(driver) = ns.device_mut() else {
         return -1;
     };
     let frame = core::slice::from_raw_parts(frame, len);
@@ -72,7 +73,8 @@ pub(super) unsafe fn user_net_tx(frame: *const u8, len: usize) -> i64 {
 }
 
 pub(super) unsafe fn user_net_rx(buf: *mut u8, buf_len: usize) -> i64 {
-    let Some(driver) = state::user_net_driver_mut() else {
+    let mut ns = state::net();
+    let Some(driver) = ns.device_mut() else {
         return -1;
     };
     let buf = core::slice::from_raw_parts_mut(buf, buf_len);
@@ -84,14 +86,16 @@ pub(super) unsafe fn user_net_rx(buf: *mut u8, buf_len: usize) -> i64 {
 }
 
 pub(super) unsafe fn user_net_link_up() -> i64 {
-    let Some(driver) = state::user_net_driver_mut() else {
+    let mut ns = state::net();
+    let Some(driver) = ns.device_mut() else {
         return 0;
     };
     driver.link_up() as i64
 }
 
 pub(super) unsafe fn user_net_mac(out: *mut u8) -> i64 {
-    let Some(driver) = state::user_net_driver_mut() else {
+    let mut ns = state::net();
+    let Some(driver) = ns.device_mut() else {
         return -1;
     };
     let mac = driver.mac_address();
@@ -100,7 +104,8 @@ pub(super) unsafe fn user_net_mac(out: *mut u8) -> i64 {
 }
 
 pub(super) unsafe fn user_net_refill() -> i64 {
-    let Some(driver) = state::user_net_driver_mut() else {
+    let mut ns = state::net();
+    let Some(driver) = ns.device_mut() else {
         return -1;
     };
     driver.refill_rx_queue();

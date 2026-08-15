@@ -430,6 +430,16 @@ do_build_keymaps() {
 do_build_user_apps() {
     log_step "Building User-Space Apps"
 
+    # Userland moved to a private repo; these packages aren't in this workspace.
+    # Skip the whole step unless the first app's manifest is actually present, so
+    # the default (kernel-only) setup doesn't abort on a missing-package error.
+    local first_pkg="${USER_APPS[0]%%,*}"
+    if ! cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | grep -q "\"name\":\"${first_pkg}\""; then
+        log_warn "Userland packages not in this workspace (moved to private repo) — skipping"
+        return 0
+    fi
+
     # Verify the pinned nightly is available (required for build-std + custom JSON target).
     if ! rustup toolchain list 2>/dev/null | grep -q "^${PINNED_NIGHTLY}"; then
         log_warn "Pinned nightly (${PINNED_NIGHTLY}) not found — skipping user app build"

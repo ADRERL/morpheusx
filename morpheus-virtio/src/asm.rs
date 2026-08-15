@@ -1,23 +1,20 @@
 //! VirtIO ASM bindings.
 //!
 //! Complete bindings for VirtIO device initialization and virtqueue operations.
-//!
-//! Phase 3.1 Wave 1 — moved from `network/src/asm/drivers/virtio.rs`. The
-//! `extern "win64"` symbols come from the static archive assembled by
+//! The `extern "win64"` symbols come from the static archive assembled by
 //! `morpheus-virtio/build.rs` out of `asm/virtio/*.s`.
 
 use crate::types::{RxResult, VirtqueueState};
 
 #[cfg(target_arch = "x86_64")]
 extern "win64" {
-    /// Verify VirtIO magic value (0x74726976 = "virt").
-    /// Returns 1 if valid, 0 if not.
+    #[allow(dead_code)]
     fn asm_virtio_verify_magic(mmio_base: u64) -> u32;
 
-    /// Get VirtIO device version (2 = modern).
+    #[allow(dead_code)]
     fn asm_virtio_get_version(mmio_base: u64) -> u32;
 
-    /// Get VirtIO device ID (1 = net, 2 = block, etc.).
+    #[allow(dead_code)]
     fn asm_virtio_get_device_id(mmio_base: u64) -> u32;
 
     /// Reset VirtIO device (write 0 to status, wait for completion).
@@ -73,6 +70,7 @@ extern "win64" {
     fn asm_vq_is_ready(mmio_base: u64) -> u32;
 
     /// Full queue setup helper.
+    #[allow(dead_code)]
     fn asm_vq_setup(
         mmio_base: u64,
         queue_idx: u16,
@@ -108,7 +106,7 @@ extern "win64" {
     /// Returns buffer index (0-0xFFFE) or 0xFFFFFFFF if no completion.
     fn asm_vq_poll_tx_complete(vq: *mut VirtqueueState) -> u32;
 
-    /// Get number of available TX slots.
+    #[allow(dead_code)]
     fn asm_vq_tx_avail_slots(vq: *mut VirtqueueState) -> u16;
 
     /// Submit buffer to RX queue.
@@ -119,7 +117,7 @@ extern "win64" {
     /// Returns 0 if no packet, 1 if packet ready (result populated).
     fn asm_vq_poll_rx(vq: *mut VirtqueueState, result: *mut RxResult) -> u32;
 
-    /// Get number of pending RX packets.
+    #[allow(dead_code)]
     fn asm_vq_rx_pending(vq: *mut VirtqueueState) -> u16;
 }
 
@@ -128,10 +126,10 @@ extern "win64" {
     /// Notify device about queue activity (uses vq.notify_addr).
     fn asm_vq_notify(vq: *mut VirtqueueState);
 
-    /// Direct notify with explicit address.
+    #[allow(dead_code)]
     fn asm_vq_notify_direct(notify_addr: u64, queue_idx: u16);
 
-    /// Check if notification is needed (event suppression).
+    #[allow(dead_code)]
     fn asm_vq_should_notify(vq: *mut VirtqueueState) -> u32;
 
     /// Set notify address in VirtqueueState.
@@ -143,45 +141,34 @@ extern "win64" {
 pub mod device {
     use super::*;
 
-    /// Check if MMIO region contains valid VirtIO device.
-    #[cfg(target_arch = "x86_64")]
-    pub fn verify_magic(mmio_base: u64) -> bool {
-        unsafe { asm_virtio_verify_magic(mmio_base) == 1 }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn get_version(mmio_base: u64) -> u32 {
-        unsafe { asm_virtio_get_version(mmio_base) }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn get_device_id(mmio_base: u64) -> u32 {
-        unsafe { asm_virtio_get_device_id(mmio_base) }
-    }
-
     /// Reset device. Returns true on success.
     #[cfg(target_arch = "x86_64")]
     pub fn reset(mmio_base: u64) -> bool {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; asm_virtio_reset only touches the status register at a fixed offset.
         unsafe { asm_virtio_reset(mmio_base) == 0 }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn set_status(mmio_base: u64, status: u8) {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; writes the status register only.
         unsafe { asm_virtio_set_status(mmio_base, status) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn get_status(mmio_base: u64) -> u8 {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; status register is always readable.
         unsafe { asm_virtio_get_status(mmio_base) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn read_features(mmio_base: u64) -> u64 {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; feature registers are always readable.
         unsafe { asm_virtio_read_features(mmio_base) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn write_features(mmio_base: u64, features: u64) {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; writes only the driver-features registers.
         unsafe { asm_virtio_write_features(mmio_base, features) }
     }
 
@@ -189,6 +176,7 @@ pub mod device {
     #[cfg(target_arch = "x86_64")]
     pub fn read_mac(mmio_base: u64) -> Option<[u8; 6]> {
         let mut mac = [0u8; 6];
+        // SAFETY: mmio_base is owned MMIO; mac_out points to a valid, live 6-byte local array.
         if unsafe { asm_virtio_read_mac(mmio_base, &mut mac) } == 0 {
             Some(mac)
         } else {
@@ -197,18 +185,6 @@ pub mod device {
     }
 
     // Stubs for non-x86_64
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn verify_magic(_mmio_base: u64) -> bool {
-        false
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn get_version(_mmio_base: u64) -> u32 {
-        0
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn get_device_id(_mmio_base: u64) -> u32 {
-        0
-    }
     #[cfg(not(target_arch = "x86_64"))]
     pub fn reset(_mmio_base: u64) -> bool {
         false
@@ -237,66 +213,47 @@ pub mod queue {
 
     #[cfg(target_arch = "x86_64")]
     pub fn select(mmio_base: u64, queue_idx: u16) {
+        // SAFETY: mmio_base is the caller's owned, UC-mapped VirtIO MMIO BAR; writes the QueueSel register only.
         unsafe { asm_vq_select(mmio_base, queue_idx) }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn get_max_size(mmio_base: u64) -> u16 {
-        unsafe { asm_vq_get_max_size(mmio_base) }
     }
 
     /// Get queue size (alias for get_max_size for compatibility).
     #[cfg(target_arch = "x86_64")]
     pub fn get_size(mmio_base: u64) -> u16 {
+        // SAFETY: mmio_base is owned MMIO; reads QueueNumMax for the queue selected via select().
         unsafe { asm_vq_get_max_size(mmio_base) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn set_size(mmio_base: u64, size: u16) {
+        // SAFETY: mmio_base is owned MMIO; writes QueueNum for the queue selected via select().
         unsafe { asm_vq_set_size(mmio_base, size) }
     }
 
     /// Set descriptor table address.
     #[cfg(target_arch = "x86_64")]
     pub fn set_desc_addr(mmio_base: u64, addr: u64) {
+        // SAFETY: mmio_base is owned MMIO; addr is the physical address of a driver-owned descriptor table, written verbatim to the QueueDesc register.
         unsafe { asm_vq_set_desc(mmio_base, addr) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn set_driver_addr(mmio_base: u64, addr: u64) {
+        // SAFETY: mmio_base is owned MMIO; addr is the physical address of a driver-owned avail ring, written verbatim to the QueueDriver register.
         unsafe { asm_vq_set_driver(mmio_base, addr) }
     }
 
     #[cfg(target_arch = "x86_64")]
     pub fn set_device_addr(mmio_base: u64, addr: u64) {
+        // SAFETY: mmio_base is owned MMIO; addr is the physical address of a driver-owned used ring, written verbatim to the QueueDevice register.
         unsafe { asm_vq_set_device(mmio_base, addr) }
     }
 
     /// Enable the selected queue.
     #[cfg(target_arch = "x86_64")]
     pub fn enable(mmio_base: u64) {
+        // SAFETY: mmio_base is owned MMIO; writes QueueReady for the queue selected via select(), whose rings were already configured.
         unsafe { asm_vq_enable(mmio_base) }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn setup(
-        mmio_base: u64,
-        queue_idx: u16,
-        size: u16,
-        desc_addr: u64,
-        driver_addr: u64,
-        device_addr: u64,
-    ) {
-        unsafe {
-            asm_vq_setup(
-                mmio_base,
-                queue_idx,
-                size,
-                desc_addr,
-                driver_addr,
-                device_addr,
-            )
-        }
     }
 
     /// Get notify offset for queue notifications.
@@ -309,10 +266,6 @@ pub mod queue {
     // Stubs for non-x86_64
     #[cfg(not(target_arch = "x86_64"))]
     pub fn select(_mmio_base: u64, _queue_idx: u16) {}
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn get_max_size(_mmio_base: u64) -> u16 {
-        0
-    }
     #[cfg(not(target_arch = "x86_64"))]
     pub fn get_size(_mmio_base: u64) -> u16 {
         0
@@ -328,16 +281,6 @@ pub mod queue {
     #[cfg(not(target_arch = "x86_64"))]
     pub fn enable(_mmio_base: u64) {}
     #[cfg(not(target_arch = "x86_64"))]
-    pub fn setup(
-        _mmio_base: u64,
-        _queue_idx: u16,
-        _size: u16,
-        _desc_addr: u64,
-        _driver_addr: u64,
-        _device_addr: u64,
-    ) {
-    }
-    #[cfg(not(target_arch = "x86_64"))]
     pub fn get_notify_offset(_mmio_base: u64) -> u64 {
         0x50
     }
@@ -351,6 +294,7 @@ pub mod tx {
     /// Returns true on success, false if queue full.
     #[cfg(target_arch = "x86_64")]
     pub fn submit(vq: &mut VirtqueueState, buffer_idx: u16, len: u16) -> bool {
+        // SAFETY: vq is a live, exclusively-borrowed VirtqueueState backed by the driver's DMA rings; buffer_idx is caller-validated against queue size.
         unsafe { asm_vq_submit_tx(vq, buffer_idx, len) == 0 }
     }
 
@@ -358,17 +302,13 @@ pub mod tx {
     /// Returns Some(buffer_idx) if a buffer completed, None otherwise.
     #[cfg(target_arch = "x86_64")]
     pub fn poll_complete(vq: &mut VirtqueueState) -> Option<u16> {
+        // SAFETY: vq is a live, exclusively-borrowed VirtqueueState backed by the driver's DMA rings.
         let result = unsafe { asm_vq_poll_tx_complete(vq) };
         if result == 0xFFFFFFFF {
             None
         } else {
             Some(result as u16)
         }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn available_slots(vq: &mut VirtqueueState) -> u16 {
-        unsafe { asm_vq_tx_avail_slots(vq) }
     }
 
     // Stubs for non-x86_64
@@ -380,10 +320,6 @@ pub mod tx {
     pub fn poll_complete(_vq: &mut VirtqueueState) -> Option<u16> {
         None
     }
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn available_slots(_vq: &mut VirtqueueState) -> u16 {
-        0
-    }
 }
 
 /// RX operations.
@@ -394,6 +330,7 @@ pub mod rx {
     /// Returns true on success, false if queue full.
     #[cfg(target_arch = "x86_64")]
     pub fn submit(vq: &mut VirtqueueState, buffer_idx: u16, capacity: u16) -> bool {
+        // SAFETY: vq is a live, exclusively-borrowed VirtqueueState backed by the driver's DMA rings; buffer_idx is caller-validated against queue size.
         unsafe { asm_vq_submit_rx(vq, buffer_idx, capacity) == 0 }
     }
 
@@ -402,17 +339,12 @@ pub mod rx {
     #[cfg(target_arch = "x86_64")]
     pub fn poll(vq: &mut VirtqueueState) -> Option<RxResult> {
         let mut result = RxResult::default();
+        // SAFETY: vq is a live, exclusively-borrowed VirtqueueState; result points to a valid, live local RxResult.
         if unsafe { asm_vq_poll_rx(vq, &mut result) } == 1 {
             Some(result)
         } else {
             None
         }
-    }
-
-    /// Get number of pending packets.
-    #[cfg(target_arch = "x86_64")]
-    pub fn pending_count(vq: &mut VirtqueueState) -> u16 {
-        unsafe { asm_vq_rx_pending(vq) }
     }
 
     // Stubs for non-x86_64
@@ -423,10 +355,6 @@ pub mod rx {
     #[cfg(not(target_arch = "x86_64"))]
     pub fn poll(_vq: &mut VirtqueueState) -> Option<RxResult> {
         None
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn pending_count(_vq: &mut VirtqueueState) -> u16 {
-        0
     }
 }
 
@@ -441,27 +369,11 @@ pub mod notify {
         if vq.notify_addr == 0 || vq.notify_addr < 0x1000 {
             return; // Invalid notify address, skip
         }
+        // SAFETY: vq is a live, exclusively-borrowed VirtqueueState; notify_addr was just range-checked above.
         unsafe { asm_vq_notify(vq) }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn notify_direct(notify_addr: u64, queue_idx: u16) {
-        unsafe { asm_vq_notify_direct(notify_addr, queue_idx) }
-    }
-
-    /// Check if notification is needed.
-    #[cfg(target_arch = "x86_64")]
-    pub fn should_notify(vq: &mut VirtqueueState) -> bool {
-        unsafe { asm_vq_should_notify(vq) == 1 }
     }
 
     // Stubs for non-x86_64
     #[cfg(not(target_arch = "x86_64"))]
     pub fn notify(_vq: &mut VirtqueueState) {}
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn notify_direct(_notify_addr: u64, _queue_idx: u16) {}
-    #[cfg(not(target_arch = "x86_64"))]
-    pub fn should_notify(_vq: &mut VirtqueueState) -> bool {
-        false
-    }
 }

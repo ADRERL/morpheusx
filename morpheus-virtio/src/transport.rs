@@ -61,6 +61,7 @@ impl VirtioTransport {
     pub fn get_status(&self) -> u8 {
         match self.transport_type {
             TransportType::Mmio => mmio_device::get_status(self.base),
+            // SAFETY: self.base is the owned common_cfg BAR for PCI Modern transport, UC-mapped by the caller.
             TransportType::PciModern => unsafe { pci_modern::get_status(self.base) as u8 },
             TransportType::PciLegacy => 0, // Not supported
         }
@@ -69,6 +70,7 @@ impl VirtioTransport {
     pub fn set_status(&self, status: u8) {
         match self.transport_type {
             TransportType::Mmio => mmio_device::set_status(self.base, status),
+            // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; writes the status register only.
             TransportType::PciModern => unsafe { pci_modern::set_status(self.base, status) },
             TransportType::PciLegacy => {}, // Not supported
         }
@@ -78,6 +80,7 @@ impl VirtioTransport {
         // Note: MMIO reset doesn't use tsc_freq, PCI Modern does for timeout
         match self.transport_type {
             TransportType::Mmio => mmio_device::reset(self.base),
+            // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; tsc_freq is only used for a bounded timeout loop.
             TransportType::PciModern => unsafe { pci_modern::reset(self.base, tsc_freq) == 0 },
             TransportType::PciLegacy => false,
         }
@@ -86,6 +89,7 @@ impl VirtioTransport {
     pub fn read_features(&self) -> u64 {
         match self.transport_type {
             TransportType::Mmio => mmio_device::read_features(self.base),
+            // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; feature registers are always readable.
             TransportType::PciModern => unsafe { pci_modern::read_features(self.base) },
             TransportType::PciLegacy => 0,
         }
@@ -94,6 +98,7 @@ impl VirtioTransport {
     pub fn write_features(&self, features: u64) {
         match self.transport_type {
             TransportType::Mmio => mmio_device::write_features(self.base, features),
+            // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; writes only the driver-features registers.
             TransportType::PciModern => unsafe { pci_modern::write_features(self.base, features) },
             TransportType::PciLegacy => {},
         }
@@ -101,12 +106,14 @@ impl VirtioTransport {
 
     pub fn get_num_queues(&self) -> u16 {
         match self.transport_type {
+            // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; num_queues register is always readable.
             TransportType::PciModern => unsafe { pci_modern::get_num_queues(self.base) as u16 },
             _ => 2, // MMIO net default: RX + TX
         }
     }
 
     pub fn select_queue(&self, queue_idx: u16) {
+        // SAFETY: self.base is the owned, UC-mapped VirtIO MMIO/common_cfg BAR; QueueSel is a valid fixed-offset register for each transport.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -121,6 +128,7 @@ impl VirtioTransport {
     }
 
     pub fn get_queue_size(&self) -> u16 {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; QueueNumMax is a valid fixed-offset register, always readable.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -134,6 +142,7 @@ impl VirtioTransport {
     }
 
     pub fn set_queue_size(&self, size: u16) {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; QueueNum is a valid fixed-offset register for the queue selected via select_queue().
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -148,6 +157,7 @@ impl VirtioTransport {
     }
 
     pub fn set_queue_desc(&self, addr: u64) {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; addr is the physical address of a driver-owned descriptor table, written verbatim to QueueDescLow/High.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -164,6 +174,7 @@ impl VirtioTransport {
     }
 
     pub fn set_queue_avail(&self, addr: u64) {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; addr is the physical address of a driver-owned avail ring, written verbatim to QueueDriverLow/High.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -180,6 +191,7 @@ impl VirtioTransport {
     }
 
     pub fn set_queue_used(&self, addr: u64) {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; addr is the physical address of a driver-owned used ring, written verbatim to QueueDeviceLow/High.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -196,6 +208,7 @@ impl VirtioTransport {
     }
 
     pub fn enable_queue(&self) {
+        // SAFETY: self.base is the owned, UC-mapped MMIO/common_cfg BAR; QueueReady is a valid fixed-offset register for the queue whose rings were already configured.
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -214,6 +227,7 @@ impl VirtioTransport {
             TransportType::Mmio => self.base + 0x050, // fixed notify register
             TransportType::PciModern => {
                 // notify_cfg + notify_off * multiplier, per queue
+                // SAFETY: self.base is the owned, UC-mapped common_cfg BAR; select_queue + notify_off read are both valid fixed-offset register accesses.
                 unsafe {
                     pci_modern::select_queue(self.base, queue_idx);
                     let queue_notify_off = pci_modern::get_queue_notify_off(self.base);
@@ -227,6 +241,7 @@ impl VirtioTransport {
     }
 
     pub fn notify_queue(&self, queue_idx: u16) {
+        // SAFETY: notify_addr is the device's QueueNotify register (fixed MMIO offset, or PCI Modern notify_cfg-derived address computed in get_notify_addr).
         unsafe {
             match self.transport_type {
                 TransportType::Mmio => {
@@ -255,6 +270,7 @@ impl VirtioTransport {
             },
             TransportType::PciModern => {
                 if self.pci_modern.device_cfg != 0 {
+                    // SAFETY: device_cfg is the owned, UC-mapped device-specific config BAR; mac_out is a valid, live 6-byte caller buffer.
                     unsafe {
                         pci_modern::read_mac(self.pci_modern.device_cfg, mac_out.as_mut_ptr());
                     }
@@ -302,6 +318,7 @@ impl VirtioTransport {
         match self.transport_type {
             TransportType::Mmio => {
                 // MMIO device config at offset 0x100
+                // SAFETY: self.base is the owned, UC-mapped VirtIO MMIO BAR; config_base + capacity field is always present for virtio-blk.
                 unsafe {
                     let config_base = self.base + 0x100;
                     core::ptr::read_volatile(config_base as *const u64)
@@ -309,6 +326,7 @@ impl VirtioTransport {
             },
             TransportType::PciModern => {
                 if self.pci_modern.device_cfg != 0 {
+                    // SAFETY: device_cfg is the owned, UC-mapped device-specific config BAR; capacity field is at offset 0 for virtio-blk.
                     unsafe { core::ptr::read_volatile(self.pci_modern.device_cfg as *const u64) }
                 } else {
                     0
@@ -322,12 +340,14 @@ impl VirtioTransport {
     /// if VIRTIO_BLK_F_BLK_SIZE was negotiated.
     pub fn read_blk_size(&self) -> u32 {
         match self.transport_type {
+            // SAFETY: self.base is the owned, UC-mapped VirtIO MMIO BAR; offset 20 in device config is the blk_size field.
             TransportType::Mmio => unsafe {
                 let config_base = self.base + 0x100 + 20;
                 core::ptr::read_volatile(config_base as *const u32)
             },
             TransportType::PciModern => {
                 if self.pci_modern.device_cfg != 0 {
+                    // SAFETY: device_cfg is the owned, UC-mapped device-specific config BAR; offset 20 is the blk_size field.
                     unsafe {
                         core::ptr::read_volatile((self.pci_modern.device_cfg + 20) as *const u32)
                     }

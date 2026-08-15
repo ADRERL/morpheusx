@@ -285,7 +285,13 @@ pub fn debug_log_pop() -> Option<DebugLogEntry> {
 }
 
 pub fn debug_log_available() -> bool {
-    unsafe { DEBUG_RING.count > 0 }
+    if DEBUG_RING_LOCK.swap(true, core::sync::atomic::Ordering::Acquire) {
+        // contended: writer active, report non-empty next poll
+        return false;
+    }
+    let available = unsafe { DEBUG_RING.count > 0 };
+    DEBUG_RING_LOCK.store(false, core::sync::atomic::Ordering::Release);
+    available
 }
 
 pub fn debug_log_clear() {

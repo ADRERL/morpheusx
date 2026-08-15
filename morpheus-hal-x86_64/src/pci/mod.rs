@@ -2,7 +2,6 @@
 
 pub mod capability;
 pub mod config;
-pub mod dump;
 pub mod msi;
 
 pub use capability::{

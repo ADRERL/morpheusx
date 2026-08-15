@@ -13,9 +13,6 @@ use morpheus_x86_asm::mmio;
 /// clear of the timer (0x20).
 pub const XHCI_VECTOR: u8 = 0x40;
 
-/// Diagnostic counter of observed xHCI MSI-X interrupts.
-pub static XHCI_EVENT_COUNT: AtomicU64 = AtomicU64::new(0);
-
 /// xHCI runtime register base, published by `wire_msix` so the ISR can W1C the
 /// interrupter IP bit without borrowing the (Phase-9-owned) controller struct.
 static XHCI_RT_BASE: AtomicU64 = AtomicU64::new(0);
@@ -23,8 +20,6 @@ static XHCI_RT_BASE: AtomicU64 = AtomicU64::new(0);
 /// Interrupt-context handler: no alloc, no sleeping locks. Acks at the device,
 /// then EOIs the LAPIC.
 extern "C" fn xhci_isr_rust() {
-    XHCI_EVENT_COUNT.fetch_add(1, Ordering::Relaxed);
-
     // Ack the interrupter: W1C the IP bit (bit 0) of IMAN. Preserve IE (bit 1).
     let rt_base = XHCI_RT_BASE.load(Ordering::Relaxed);
     if rt_base != 0 {

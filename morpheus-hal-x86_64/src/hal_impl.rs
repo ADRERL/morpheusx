@@ -348,23 +348,46 @@ impl PhysAlloc for HalImpl {
         0
     }
     unsafe fn reclaim_boot_services(&self) -> Result<u64, ()> {
-        // TODO: FIX! BootServices reclaim is no-op'd as a boot-unblock.
-        //
-        // On real hardware the post-EBS reclaim adds a region whose contents
-        // appear as corrupt free-list nodes (kernel-half / poison `next`
-        // pointers) and hangs the buddy validate walk. This is a regression vs
-        // pre-refactor (commit 9276267): the buddy/reclaim/paging code is
-        // byte-identical to the working version, so the offending data/layout
-        // is introduced elsewhere in the refactor (something live left in a
-        // BootServices-typed region). Root cause still OPEN — needs the corrupt
-        // pointer values from a real-HW run to pin the source.
-        //
-        // Skipping reclaim only forfeits the firmware's BootServices RAM (~tens
-        // of MB, <1% on a multi-GB box; conventional memory is already in the
-        // buddy and plentiful), so boot proceeds to userland. Restore the
-        // original body (see `git show 9276267^:hwinit/src/platform.rs` reclaim
-        // sequence, mirrored here) once the corrupt-region source is found.
-        Ok(0)
+        // SAFETY: caller asserts single-threaded, no UEFI BS call in flight.
+        // IF toggled because timer/IPI delivery races allocator + paging mutation.
+        let was_enabled = crate::intr::interrupts_enabled();
+        crate::intr::disable_interrupts();
+
+        let free_before = crate::memory::global_registry().free_memory();
+
+        // Collect live PT pages first — FreeNode over a live PML4 entry → #PF.
+        let (mut pt_pages, pt_count) = crate::paging::collect_page_table_pages();
+
+        // Insertion sort — pt_count < 50 typical.
+        for i in 1..pt_count {
+            let key = pt_pages[i];
+            let mut j = i;
+            while j > 0 && pt_pages[j - 1] > key {
+                pt_pages[j] = pt_pages[j - 1];
+                j -= 1;
+            }
+            pt_pages[j] = key;
+        }
+
+        {
+            let mut reg = crate::memory::global_registry_mut();
+            reg.reclaim_boot_services(&pt_pages[..pt_count]);
+            reg.validate_free_lists();
+        }
+
+        // Re-pin PT pages so spare splits during reclaim don't hand one out.
+        crate::paging::reserve_page_table_pages();
+        {
+            let reg = crate::memory::global_registry_mut();
+            reg.validate_free_lists();
+        }
+
+        if was_enabled {
+            crate::intr::enable_interrupts();
+        }
+
+        let free_after = crate::memory::global_registry().free_memory();
+        Ok(free_after.saturating_sub(free_before))
     }
 }
 

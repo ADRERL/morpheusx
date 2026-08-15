@@ -221,7 +221,6 @@ dependencies = [
  "morpheus-kernel",
  "morpheus-net-stack",
  "morpheus-nic",
- "morpheus-ui",
  "morpheus-virtio",
  "morpheus-xhci",
  "spin",
@@ -320,6 +319,7 @@ name = "morpheus-nic"
 version = "1.0.1"
 dependencies = [
  "morpheus-foundation",
+ "morpheus-hal-api",
  "morpheus-hal-x86_64",
  "morpheus-virtio",
 ]

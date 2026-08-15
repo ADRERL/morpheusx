@@ -228,7 +228,7 @@ fn wake_tokens(a: u64, b: u64) {
 /// SAFETY / IRQ discipline: this takes ONLY `PROCESS_TABLE_LOCK` (an
 /// `IsrSafeRawSpinLock`, so an IRQ can never land on a core already holding it) and
 /// touches NO smoltcp/NIC state, so it is safe to call from interrupt context and
-/// cannot alias the `&mut USER_NET_STACK` an interrupted syscall thread may hold.
+/// cannot deadlock on the net-state `SpinLock` an interrupted syscall thread may hold.
 /// The wake is GLOBAL, so an RX IRQ delivered to a different core than the parked
 /// `epoll_wait` still wakes it (SMP-correct).
 ///

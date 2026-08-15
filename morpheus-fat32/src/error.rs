@@ -3,7 +3,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fat32Error {
     IoRead,
+    // matched by morpheus-kernel's exhaustive Fat32Error->VfsError map; keep even
+    // though this crate never constructs them (read-only + host-import today)
     IoWrite,
+    PathInvalid,
 
     /// BPB boot signature / FAT32 markers absent or inconsistent.
     NotFat32,
@@ -16,7 +19,6 @@ pub enum Fat32Error {
     NotADirectory,
     IsADirectory,
     PathTooLong,
-    PathInvalid,
 
     /// Cluster chain ran into a free/bad marker or looped past the file size.
     ChainCorrupt,

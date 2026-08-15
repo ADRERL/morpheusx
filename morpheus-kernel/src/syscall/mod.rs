@@ -6,7 +6,6 @@
 pub mod handler;
 
 use crate::hal;
-use crate::process::ProcessState;
 use crate::schedular::SCHEDULER;
 use handler::clock::{sys_clock_gettime, sys_nanosleep};
 use handler::compositor::{
@@ -221,7 +220,6 @@ pub unsafe extern "C" fn syscall_dispatch(
         unknown => {
             crate::serial::log_warn("SYSCALL", 801, "unknown syscall number");
             let _ = unknown;
-            let _ = ProcessState::Ready;
             ENOSYS
         },
     }

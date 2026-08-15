@@ -23,7 +23,6 @@ macro_rules! impl_from {
 }
 
 pub mod ahci;
-pub mod block_io_adapter;
 pub mod block_traits;
 pub mod boot_probe;
 pub mod device;
@@ -32,7 +31,6 @@ pub mod raw_device;
 pub mod sdhci;
 pub mod transfer;
 pub mod unified_block_io;
-pub mod usb_class;
 pub mod usb_msd;
 pub mod virtio_blk;
 

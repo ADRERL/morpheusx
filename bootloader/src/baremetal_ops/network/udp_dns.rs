@@ -3,7 +3,8 @@ use core::net::Ipv4Addr;
 use super::state;
 
 pub(super) unsafe fn net_udp_socket_impl() -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -11,10 +12,10 @@ pub(super) unsafe fn net_udp_socket_impl() -> i64 {
         return -1;
     };
 
-    if let Some(handle) = state::alloc_udp_slot(socket) {
+    if let Some(handle) = ns.alloc_udp_slot(socket) {
         handle
     } else {
-        stack.remove_socket(socket);
+        ns.stack.as_mut().unwrap().remove_socket(socket);
         -1
     }
 }
@@ -29,10 +30,11 @@ pub(super) unsafe fn net_udp_send_to_impl(
     if len == 0 {
         return 0;
     }
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_udp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_udp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -52,10 +54,11 @@ pub(super) unsafe fn net_udp_recv_from_impl(
     if len == 0 {
         return 0;
     }
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_udp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_udp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -73,10 +76,11 @@ pub(super) unsafe fn net_udp_recv_from_impl(
 }
 
 pub(super) unsafe fn net_udp_close_impl(handle: i64) {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.take_udp_slot(handle) else {
         return;
     };
-    let Some(socket) = state::take_udp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return;
     };
 
@@ -84,7 +88,8 @@ pub(super) unsafe fn net_udp_close_impl(handle: i64) {
 }
 
 pub(super) unsafe fn net_dns_start_impl(name: *const u8, len: usize) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
     if name.is_null() || len == 0 {
@@ -103,31 +108,33 @@ pub(super) unsafe fn net_dns_start_impl(name: *const u8, len: usize) -> i64 {
     // Tag the slot with the current monotonic time so the TTL reap can reclaim it
     // if the query is later abandoned.
     let now_ms = stack.last_poll_ms();
-    match state::alloc_dns_query_slot(query, now_ms) {
+    match ns.alloc_dns_query_slot(query, now_ms) {
         Some(handle) => handle,
         None => {
             // Table full: cancel rather than leak the smoltcp query slot.
-            stack.cancel_dns_query(query);
+            ns.stack.as_mut().unwrap().cancel_dns_query(query);
             -1
         },
     }
 }
 
 pub(super) unsafe fn net_dns_cancel_impl(query: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    if ns.stack.is_none() {
         return -1;
-    };
-    if let Some(query_handle) = state::take_dns_query_slot(query) {
-        stack.cancel_dns_query(query_handle);
+    }
+    if let Some(query_handle) = ns.take_dns_query_slot(query) {
+        ns.stack.as_mut().unwrap().cancel_dns_query(query_handle);
     }
     0
 }
 
 pub(super) unsafe fn net_dns_result_impl(query: i64, out: *mut u8) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(query_handle) = ns.get_dns_query_slot(query) else {
         return -1;
     };
-    let Some(query_handle) = state::get_dns_query_slot(query) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -135,19 +142,20 @@ pub(super) unsafe fn net_dns_result_impl(query: i64, out: *mut u8) -> i64 {
         Ok(Some(ip)) => {
             let nbo = state::ip_to_nbo(ip);
             core::ptr::copy_nonoverlapping((&nbo as *const u32).cast::<u8>(), out, 4);
-            state::clear_dns_query_slot(query);
+            ns.clear_dns_query_slot(query);
             0
         },
         Ok(None) => 1,
         Err(_) => {
-            state::clear_dns_query_slot(query);
+            ns.clear_dns_query_slot(query);
             -1
         },
     }
 }
 
 pub(super) unsafe fn net_dns_set_servers_impl(servers: *const u32, count: usize) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
     if servers.is_null() || count == 0 {

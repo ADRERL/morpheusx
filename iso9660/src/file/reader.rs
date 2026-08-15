@@ -69,16 +69,6 @@ impl<'a, B: BlockIo> FileReader<'a, B> {
         self.position = pos.min(self.file.size);
     }
 
-    /// Seek relative to current position; saturates at 0 and file size.
-    pub fn seek_relative(&mut self, offset: i64) {
-        let new_pos = if offset < 0 {
-            self.position.saturating_sub((-offset) as u64)
-        } else {
-            self.position.saturating_add(offset as u64)
-        };
-        self.position = new_pos.min(self.file.size);
-    }
-
     /// Current read offset, in bytes.
     pub fn position(&self) -> u64 {
         self.position
@@ -92,10 +82,5 @@ impl<'a, B: BlockIo> FileReader<'a, B> {
     /// True once the read position has reached end of file.
     pub fn is_eof(&self) -> bool {
         self.position >= self.file.size
-    }
-
-    /// Bytes left until EOF.
-    pub fn remaining(&self) -> u64 {
-        self.file.size.saturating_sub(self.position)
     }
 }

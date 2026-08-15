@@ -14,8 +14,6 @@ const ASM_CPU: &[&str] = &[
 
 const ASM_PCI: &[&str] = &[
     "asm/pci/legacy.s",
-    "asm/pci/ecam.s",
-    "asm/pci/bar.s",
     "asm/pci/capability.s",
     "asm/pci/virtio_cap.s",
 ];

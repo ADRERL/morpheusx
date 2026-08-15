@@ -19,7 +19,7 @@ pub struct InputKey {
     pub unicode_char: u16,
 }
 
-// EFI scan codes — main_menu.rs depends on these exact values.
+// EFI SIMPLE_TEXT_INPUT scan codes.
 
 pub const SCAN_NULL: u16 = 0x00;
 pub const SCAN_UP: u16 = 0x01;

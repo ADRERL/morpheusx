@@ -603,6 +603,64 @@ pub struct Scheduler;
 
 pub static SCHEDULER: Scheduler = Scheduler;
 
+/// Look up `pid` in `PROCESS_TABLE` and run `f` on the live (non-freed) slot
+/// while `PROCESS_TABLE_LOCK` is held; the lock scopes the static-mut access.
+/// Returns `Err(not_found)` for a missing pid, `Err(terminated)` for a freed
+/// slot, else `Ok(f(slot))`.
+///
+/// # Safety
+/// Same as any `PROCESS_TABLE` accessor: must not be called while the caller
+/// already holds `PROCESS_TABLE_LOCK` (non-reentrant spinlock).
+unsafe fn with_process_mut<T>(
+    pid: u32,
+    not_found: &'static str,
+    terminated: &'static str,
+    f: impl FnOnce(&mut Process) -> T,
+) -> Result<T, &'static str> {
+    PROCESS_TABLE_LOCK.lock();
+    let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
+        Some(s) => s,
+        None => {
+            PROCESS_TABLE_LOCK.unlock();
+            return Err(not_found);
+        },
+    };
+    if slot.is_free() {
+        PROCESS_TABLE_LOCK.unlock();
+        return Err(terminated);
+    }
+    let out = f(slot);
+    PROCESS_TABLE_LOCK.unlock();
+    Ok(out)
+}
+
+/// Read-only counterpart to [`with_process_mut`]; same locking/lookup rules.
+///
+/// # Safety
+/// Same as [`with_process_mut`].
+unsafe fn with_process<T>(
+    pid: u32,
+    not_found: &'static str,
+    terminated: &'static str,
+    f: impl FnOnce(&Process) -> T,
+) -> Result<T, &'static str> {
+    PROCESS_TABLE_LOCK.lock();
+    let slot = match PROCESS_TABLE.get(pid as usize).and_then(|s| s.as_ref()) {
+        Some(s) => s,
+        None => {
+            PROCESS_TABLE_LOCK.unlock();
+            return Err(not_found);
+        },
+    };
+    if slot.is_free() {
+        PROCESS_TABLE_LOCK.unlock();
+        return Err(terminated);
+    }
+    let out = f(slot);
+    PROCESS_TABLE_LOCK.unlock();
+    Ok(out)
+}
+
 impl Scheduler {
     pub fn snapshot_processes(&self, out: &mut [ProcessInfo]) -> usize {
         let mut n = 0;
@@ -832,40 +890,26 @@ impl Scheduler {
     }
 
     pub unsafe fn set_priority(&self, pid: u32, priority: u8) -> Result<(), &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("set_priority: PID not found");
+        with_process_mut(
+            pid,
+            "set_priority: PID not found",
+            "set_priority: process terminated",
+            |slot| {
+                slot.priority = priority;
             },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("set_priority: process terminated");
-        }
-        slot.priority = priority;
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(())
+        )
     }
 
     pub unsafe fn set_importance(&self, pid: u32, importance_16: u8) -> Result<(), &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("set_importance: PID not found");
+        with_process_mut(
+            pid,
+            "set_importance: PID not found",
+            "set_importance: process terminated",
+            |slot| {
+                slot.importance_16 = importance_16.clamp(1, 16);
+                slot.effective_weight_cache = 0;
             },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("set_importance: process terminated");
-        }
-        slot.importance_16 = importance_16.clamp(1, 16);
-        slot.effective_weight_cache = 0;
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(())
+        )
     }
 
     pub unsafe fn set_power_mode(
@@ -873,22 +917,15 @@ impl Scheduler {
         pid: u32,
         power_mode: ProcessPowerMode,
     ) -> Result<(), &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("set_power_mode: PID not found");
+        with_process_mut(
+            pid,
+            "set_power_mode: PID not found",
+            "set_power_mode: process terminated",
+            |slot| {
+                slot.power_mode = power_mode;
+                slot.effective_weight_cache = 0;
             },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("set_power_mode: process terminated");
-        }
-        slot.power_mode = power_mode;
-        slot.effective_weight_cache = 0;
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(())
+        )
     }
 
     pub unsafe fn set_policy_class(
@@ -896,60 +933,35 @@ impl Scheduler {
         pid: u32,
         policy_class: ProcessPolicyClass,
     ) -> Result<(), &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("set_policy_class: PID not found");
+        with_process_mut(
+            pid,
+            "set_policy_class: PID not found",
+            "set_policy_class: process terminated",
+            |slot| {
+                slot.policy_class = policy_class;
+                slot.effective_weight_cache = 0;
             },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("set_policy_class: process terminated");
-        }
-        slot.policy_class = policy_class;
-        slot.effective_weight_cache = 0;
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(())
+        )
     }
 
     pub unsafe fn get_scheduler_policy(
         &self,
         pid: u32,
     ) -> Result<(u8, ProcessPowerMode, ProcessPolicyClass), &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get(pid as usize).and_then(|s| s.as_ref()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("get_scheduler_policy: PID not found");
-            },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("get_scheduler_policy: process terminated");
-        }
-        let out = (slot.importance_16, slot.power_mode, slot.policy_class);
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(out)
+        with_process(
+            pid,
+            "get_scheduler_policy: PID not found",
+            "get_scheduler_policy: process terminated",
+            |slot| (slot.importance_16, slot.power_mode, slot.policy_class),
+        )
     }
 
     pub unsafe fn get_priority(&self, pid: u32) -> Result<u8, &'static str> {
-        PROCESS_TABLE_LOCK.lock();
-        let slot = match PROCESS_TABLE.get(pid as usize).and_then(|s| s.as_ref()) {
-            Some(s) => s,
-            None => {
-                PROCESS_TABLE_LOCK.unlock();
-                return Err("get_priority: PID not found");
-            },
-        };
-        if slot.is_free() {
-            PROCESS_TABLE_LOCK.unlock();
-            return Err("get_priority: process terminated");
-        }
-        let prio = slot.priority;
-        PROCESS_TABLE_LOCK.unlock();
-        Ok(prio)
+        with_process(
+            pid,
+            "get_priority: PID not found",
+            "get_priority: process terminated",
+            |slot| slot.priority,
+        )
     }
 }

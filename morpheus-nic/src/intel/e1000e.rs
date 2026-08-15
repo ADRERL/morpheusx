@@ -116,6 +116,7 @@ impl NetworkDriver for E1000eDriver {
     fn link_up(&self) -> bool {
         // Always read live STATUS — cached state lies after suspend/resume.
         let mut result = LinkStatusResult::default();
+        // SAFETY: self.mmio_base is the owned, UC-mapped e1000e BAR; result points to a valid, live local LinkStatusResult.
         unsafe {
             asm_intel_link_status(self.mmio_base, &mut result);
         }
@@ -135,6 +136,7 @@ impl DriverInit for E1000eDriver {
         E1000E_DEVICE_IDS
     }
 
+    // SAFETY: delegates to Self::new, whose contract (mmio_base is the mapped BAR0, DMA set up) is the caller's obligation per DriverInit::create's doc.
     unsafe fn create(mmio_base: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(mmio_base, config)
     }

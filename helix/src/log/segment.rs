@@ -23,6 +23,8 @@ impl LogSegmentHeader {
 
     pub fn update_crc(&mut self) {
         self.crc32c = 0;
+        // SAFETY: LogSegmentHeader is #[repr(C)]; bytes [0..40) covers magic
+        // through crc32c and lies entirely within the 64-byte header.
         let bytes = unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, 40) };
         self.crc32c = crc32c(bytes);
     }
@@ -30,6 +32,7 @@ impl LogSegmentHeader {
     pub fn verify_crc(&self) -> bool {
         let mut copy = *self;
         copy.crc32c = 0;
+        // SAFETY: same as update_crc — repr(C) header, [0..40) in bounds.
         let bytes = unsafe { core::slice::from_raw_parts(&copy as *const _ as *const u8, 40) };
         crc32c(bytes) == self.crc32c
     }

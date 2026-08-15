@@ -10,5 +10,4 @@ pub mod device;
 pub mod intel;
 pub(crate) mod serial;
 pub mod traits;
-pub mod unified;
 pub mod virtio;

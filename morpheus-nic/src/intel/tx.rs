@@ -77,6 +77,7 @@ impl TxRing {
 
         for i in 0..self.queue_size {
             let desc_ptr = self.desc_ptr(i);
+            // SAFETY: desc_ptr indexes within the driver's owned TX descriptor ring, bounded by queue_size.
             unsafe {
                 asm_intel_tx_init_desc(desc_ptr);
             }
@@ -129,17 +130,20 @@ impl TxRing {
         let buffer_cpu = self.buffer_cpu_ptr(desc_idx);
         let buffer_bus = self.buffer_bus_addr(desc_idx);
 
+        // SAFETY: frame.len() <= MAX_FRAME_SIZE <= buffer_size (checked above); buffer_cpu is the driver's owned TX buffer slot, non-overlapping with frame's source.
         unsafe {
             core::ptr::copy_nonoverlapping(frame.as_ptr(), buffer_cpu, frame.len());
         }
 
         // Sets EOP|IFCS|RS, includes sfence.
+        // SAFETY: desc_ptr/buffer_bus index the driver's owned TX ring; the buffer was just filled above.
         unsafe {
             asm_intel_tx_submit(desc_ptr, buffer_bus, frame.len() as u32);
         }
 
         self.next_to_use = (self.next_to_use + 1) % self.queue_size;
 
+        // SAFETY: mmio_base is the owned, UC-mapped e1000e BAR; writes TDT only.
         unsafe {
             asm_intel_tx_update_tail(self.mmio_base, self.next_to_use as u32);
         }
@@ -153,12 +157,14 @@ impl TxRing {
             let desc_ptr = self.desc_ptr(self.next_to_clean);
 
             // Poll includes lfence.
+            // SAFETY: desc_ptr indexes within the driver's owned TX descriptor ring.
             let is_done = unsafe { asm_intel_tx_poll(desc_ptr) };
 
             if is_done == 0 {
                 break;
             }
 
+            // SAFETY: desc_ptr indexes within the driver's owned TX descriptor ring; DD was just observed set.
             unsafe {
                 asm_intel_tx_clear_desc(desc_ptr);
             }
@@ -169,6 +175,7 @@ impl TxRing {
 
     #[inline]
     fn desc_ptr(&self, idx: u16) -> *mut u8 {
+        // SAFETY: idx < queue_size (caller-maintained invariant); desc_cpu spans queue_size * TX_DESC_SIZE bytes of the driver's owned DMA region.
         unsafe { self.desc_cpu.add((idx as usize) * TX_DESC_SIZE) }
     }
 
@@ -179,6 +186,7 @@ impl TxRing {
 
     #[inline]
     fn buffer_cpu_ptr(&self, idx: u16) -> *mut u8 {
+        // SAFETY: idx < queue_size (caller-maintained invariant); buffer_cpu spans queue_size * buffer_size bytes of the driver's owned DMA region.
         unsafe { self.buffer_cpu.add((idx as usize) * self.buffer_size) }
     }
 }

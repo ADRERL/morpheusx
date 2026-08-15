@@ -55,6 +55,9 @@ static AP_TRAMPOLINE_BIN: &[u8] = &[];
 
 /// Reserve 0x8000 from the registry, copy trampoline, fill handoff data
 /// (CR3, GDT, entry). False = page unavailable (firmware reserved).
+// SAFETY: called only from start_aps*, which runs single-threaded during BSP
+// bring-up before any AP is live, so the low-memory trampoline page and
+// global registry are exclusively owned by this call.
 unsafe fn setup_trampoline() -> bool {
     // Some firmware marks 0x8000 reserved/MMIO; validate before stomping.
     match global_registry_mut().allocate_pages(
@@ -109,6 +112,9 @@ unsafe fn setup_trampoline() -> bool {
 }
 
 /// INIT+SIPI a single AP and wait for online ack. Frees stack on timeout.
+// SAFETY: called only from start_aps*, which holds the single-threaded
+// bring-up contract — one AP is being sequenced at a time, so the shared
+// trampoline handoff block and stack allocator are not raced.
 unsafe fn boot_single_ap(core_idx: u32, lapic_id: u32) -> bool {
     let stack = match allocate_ap_stack() {
         Ok(stack) => stack,
@@ -134,6 +140,9 @@ unsafe fn boot_single_ap(core_idx: u32, lapic_id: u32) -> bool {
     }
 }
 
+// SAFETY: called only from start_aps* (via boot_single_ap), which holds the
+// single-threaded bring-up contract — the global registry is accessed under
+// exclusive BSP ownership during this phase.
 unsafe fn allocate_ap_stack() -> Result<ApStack, ApBootError> {
     let pages = AP_STACK_SIZE / PAGE_SIZE;
     let base = global_registry_mut()
@@ -147,6 +156,10 @@ unsafe fn allocate_ap_stack() -> Result<ApStack, ApBootError> {
     })
 }
 
+// SAFETY: called only from start_aps* (via boot_single_ap), which holds the
+// single-threaded bring-up contract — the trampoline handoff block at
+// AP_TRAMPOLINE_PHYS is not yet read by any AP until send_init_sipi_sequence
+// wakes one, so this write cannot race a live core.
 unsafe fn write_trampoline_handoff(stack: &ApStack, core_idx: u32, lapic_id: u32) {
     core::ptr::write_volatile((AP_TRAMPOLINE_PHYS + TD_READY) as *mut u32, 0);
     core::ptr::write_volatile((AP_TRAMPOLINE_PHYS + TD_STACK) as *mut u64, stack.top);
@@ -155,6 +168,9 @@ unsafe fn write_trampoline_handoff(stack: &ApStack, core_idx: u32, lapic_id: u32
     core::sync::atomic::fence(Ordering::SeqCst);
 }
 
+// SAFETY: called only from start_aps* (via boot_single_ap), which holds the
+// single-threaded bring-up contract — only one INIT/SIPI sequence is ever
+// in flight, targeting a LAPIC ID that has not yet been brought online.
 unsafe fn send_init_sipi_sequence(lapic_id: u32) {
     apic::send_init_assert(lapic_id);
     apic::delay_us(10_000);
@@ -166,6 +182,9 @@ unsafe fn send_init_sipi_sequence(lapic_id: u32) {
     apic::delay_us(10_000);
 }
 
+// SAFETY: called only from start_aps* (via boot_single_ap), which holds the
+// single-threaded bring-up contract — apic::delay_us during the poll does
+// not disturb the shared AP_ONLINE_COUNT counter being observed here.
 unsafe fn wait_ap_online(before: u32) -> Result<(), ApBootError> {
     let mut waited_us = 0u64;
     while per_cpu::AP_ONLINE_COUNT.load(Ordering::Acquire) <= before {

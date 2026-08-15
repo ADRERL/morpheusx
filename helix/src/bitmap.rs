@@ -3,7 +3,6 @@
 //! One block (4 KiB) maps 32768 data blocks (128 MiB).
 
 use crate::error::HelixError;
-use crate::types::BLOCK_SIZE;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -178,11 +177,5 @@ impl BlockBitmap {
             self.free_block(start + i)?;
         }
         Ok(())
-    }
-
-    /// Bitmap blocks needed on disk to cover `total_data_blocks`.
-    pub fn disk_blocks_needed(total_data_blocks: u64) -> u64 {
-        let bits_per_block = BLOCK_SIZE as u64 * 8;
-        total_data_blocks.div_ceil(bits_per_block)
     }
 }

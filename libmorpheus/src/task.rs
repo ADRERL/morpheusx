@@ -191,31 +191,7 @@ impl Runtime {
 
     /// Single-threaded loop. FIFO poll; park on empty queue while tasks remain.
     pub fn run(&self) {
-        loop {
-            while let Some(task) = self.queue.pop() {
-                task.notify.store(0, Ordering::Relaxed);
-
-                let waker = task_to_waker(&task);
-                let mut cx = Context::from_waker(&waker);
-
-                let mut future = task.future.lock();
-                match future.as_mut().poll(&mut cx) {
-                    Poll::Ready(()) => {
-                        drop(future);
-                        self.queue.active_count.fetch_sub(1, Ordering::Relaxed);
-                    },
-                    Poll::Pending => {
-                        drop(future);
-                    },
-                }
-            }
-
-            if self.queue.active_count.load(Ordering::Relaxed) == 0 {
-                break;
-            }
-
-            self.queue.park();
-        }
+        worker_loop(&self.queue);
     }
 
     /// Run on `workers` threads sharing one queue. Current thread is worker 0;

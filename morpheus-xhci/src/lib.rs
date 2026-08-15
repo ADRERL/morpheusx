@@ -24,13 +24,3 @@ pub use enumerate::{enumerate_and_bind_inputs, InputEnumerationResult, UsbInputD
 pub use hid_iface::{
     HIDInterface, USB_CLASS_HID, USB_PROTOCOL_KEYBOARD, USB_PROTOCOL_MOUSE, USB_SUBCLASS_BOOT,
 };
-
-/// Handle to an enumerated USB device shared by class consumers (HID, BOT).
-#[derive(Debug, Clone, Copy)]
-pub struct XhciDevice {
-    pub slot_id: u8,
-    pub dci_in: u8,
-    pub dci_out: u8,
-    pub mps: u16,
-    pub speed: u8,
-}

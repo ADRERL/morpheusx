@@ -44,6 +44,7 @@ impl VirtioNetHdr {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
+        // SAFETY: VirtioNetHdr is repr(C), Self::SIZE matches its on-wire byte layout, and self is a valid, live reference.
         unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, Self::SIZE) }
     }
 }

@@ -391,11 +391,10 @@ pub fn dns_set_servers(servers: &[u32]) -> Result<(), u64> {
     }
 }
 
-const CFG_GET: u64 = 0;
-const CFG_DHCP: u64 = 1;
-const CFG_STATIC: u64 = 2;
-const CFG_HOSTNAME: u64 = 3;
-const CFG_ACTIVATE: u64 = 4;
+use morpheus_foundation::net::{
+    NET_CFG_ACTIVATE as CFG_ACTIVATE, NET_CFG_DHCP as CFG_DHCP, NET_CFG_GET as CFG_GET,
+    NET_CFG_HOSTNAME as CFG_HOSTNAME, NET_CFG_STATIC as CFG_STATIC,
+};
 
 pub use morpheus_foundation::net::{
     NET_FLAG_DHCP, NET_FLAG_HAS_DNS, NET_FLAG_HAS_GATEWAY, NET_STATE_DHCP_DISCOVERING,
@@ -403,7 +402,7 @@ pub use morpheus_foundation::net::{
 };
 
 pub fn net_config() -> Result<NetConfigInfo, u64> {
-    let mut info = unsafe { core::mem::zeroed::<NetConfigInfo>() };
+    let mut info = NetConfigInfo::zeroed();
     let ret = unsafe { syscall2(SYS_NET_CFG, CFG_GET, &mut info as *mut NetConfigInfo as u64) };
     if crate::is_error(ret) {
         Err(ret)
@@ -461,8 +460,7 @@ pub fn net_activate() -> Result<u64, u64> {
     }
 }
 
-const POLL_DRIVE: u64 = 0;
-const POLL_STATS: u64 = 1;
+use morpheus_foundation::net::{NET_POLL_DRIVE as POLL_DRIVE, NET_POLL_STATS as POLL_STATS};
 
 /// Drives DHCP/ARP/TCP timers. Call periodically; returns true on activity.
 pub fn net_poll_drive(timestamp_ms: u64) -> bool {
@@ -638,13 +636,7 @@ use morpheus_foundation::types::{KTimeval, SockAddrIn, SockAddrStorage};
 
 const SOCKADDR_IN_LEN: u64 = core::mem::size_of::<SockAddrIn>() as u64;
 
-fn check(ret: u64) -> error::Result<u64> {
-    if crate::is_error(ret) {
-        Err(Error::from_raw(ret))
-    } else {
-        Ok(ret)
-    }
-}
+use crate::error::check;
 
 fn encode_addr(ip: Ipv4Addr, port: u16) -> SockAddrStorage {
     let sin = SockAddrIn {

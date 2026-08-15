@@ -99,6 +99,9 @@ pub fn ensure_directory_exists<B: BlockIo>(
             )
             .map_err(|_| Fat32Error::IoError)?;
 
+        // SAFETY: DirEntry is #[repr(C, packed)] POD (32 bytes); sector_data is
+        // a freshly read SECTOR_SIZE array and entries_per_sector =
+        // SECTOR_SIZE / size_of::<DirEntry>(), so the slice stays in bounds.
         let entries = unsafe {
             core::slice::from_raw_parts(sector_data.as_ptr() as *const DirEntry, entries_per_sector)
         };
@@ -140,6 +143,8 @@ pub fn create_directory_in_parent<B: BlockIo>(
     dotdot_entry.set_first_cluster(parent_cluster);
 
     let mut sector_data = [0u8; SECTOR_SIZE];
+    // SAFETY: DirEntry is #[repr(C, packed)] POD (32 bytes); sector_data is a
+    // local SECTOR_SIZE (>= 64) array, so 2 entries fit within it.
     let entries =
         unsafe { core::slice::from_raw_parts_mut(sector_data.as_mut_ptr() as *mut DirEntry, 2) };
     entries[0] = dot_entry;
@@ -198,6 +203,9 @@ pub fn add_dir_entry_to_cluster<B: BlockIo>(
             )
             .map_err(|_| Fat32Error::IoError)?;
 
+        // SAFETY: DirEntry is #[repr(C, packed)] POD (32 bytes); sector_data is
+        // a freshly read SECTOR_SIZE array and entries_per_sector =
+        // SECTOR_SIZE / size_of::<DirEntry>(), so the slice stays in bounds.
         let entries = unsafe {
             core::slice::from_raw_parts_mut(
                 sector_data.as_mut_ptr() as *mut DirEntry,

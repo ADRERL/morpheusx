@@ -1,7 +1,8 @@
 use super::state;
 
 pub(super) unsafe fn net_tcp_socket_impl() -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -9,19 +10,20 @@ pub(super) unsafe fn net_tcp_socket_impl() -> i64 {
         return -1;
     };
 
-    if let Some(handle) = state::alloc_tcp_slot(socket) {
+    if let Some(handle) = ns.alloc_tcp_slot(socket) {
         handle
     } else {
-        stack.remove_socket(socket);
+        ns.stack.as_mut().unwrap().remove_socket(socket);
         -1
     }
 }
 
 pub(super) unsafe fn net_tcp_connect_impl(handle: i64, ip: u32, port: u16) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -39,10 +41,11 @@ pub(super) unsafe fn net_tcp_send_impl(handle: i64, buf: *const u8, len: usize) 
     if len == 0 {
         return 0;
     }
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -57,10 +60,11 @@ pub(super) unsafe fn net_tcp_recv_impl(handle: i64, buf: *mut u8, len: usize) ->
     if len == 0 {
         return 0;
     }
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -72,10 +76,11 @@ pub(super) unsafe fn net_tcp_recv_impl(handle: i64, buf: *mut u8, len: usize) ->
 }
 
 pub(super) unsafe fn net_tcp_close_impl(handle: i64) {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.take_tcp_slot(handle) else {
         return;
     };
-    let Some(socket) = state::take_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return;
     };
 
@@ -84,10 +89,11 @@ pub(super) unsafe fn net_tcp_close_impl(handle: i64) {
 }
 
 pub(super) unsafe fn net_tcp_state_impl(handle: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
     stack.tcp_state_code(socket) as i64
@@ -97,30 +103,33 @@ pub(super) unsafe fn net_tcp_state_impl(handle: i64) -> i64 {
 /// or send would make progress right now, without consuming anything. Returns
 /// 1/0, or -1 if the stack/handle is gone.
 pub(super) unsafe fn net_tcp_can_recv_impl(handle: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
     stack.tcp_can_recv(socket) as i64
 }
 
 pub(super) unsafe fn net_tcp_can_send_impl(handle: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
     stack.tcp_can_send(socket) as i64
 }
 
 pub(super) unsafe fn net_tcp_listen_impl(handle: i64, port: u16) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -136,10 +145,11 @@ pub(super) unsafe fn net_tcp_accept_impl(
     out_ip_nbo: *mut u32,
     out_port_host: *mut u16,
 ) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(listen_socket) = ns.get_tcp_slot(listen_handle) else {
         return -1;
     };
-    let Some(listen_socket) = state::get_tcp_slot(listen_handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -172,12 +182,13 @@ pub(super) unsafe fn net_tcp_accept_impl(
         return -1;
     }
 
-    if !state::set_tcp_slot(listen_handle, new_listen_socket) {
-        stack.remove_socket(new_listen_socket);
+    if !ns.set_tcp_slot(listen_handle, new_listen_socket) {
+        ns.stack.as_mut().unwrap().remove_socket(new_listen_socket);
         return -1;
     }
 
-    state::alloc_tcp_slot(listen_socket).unwrap_or_else(|| {
+    ns.alloc_tcp_slot(listen_socket).unwrap_or_else(|| {
+        let stack = ns.stack.as_mut().unwrap();
         stack.tcp_close(listen_socket);
         stack.remove_socket(listen_socket);
         -1
@@ -185,10 +196,11 @@ pub(super) unsafe fn net_tcp_accept_impl(
 }
 
 pub(super) unsafe fn net_tcp_shutdown_impl(handle: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -200,10 +212,11 @@ pub(super) unsafe fn net_tcp_shutdown_impl(handle: i64) -> i64 {
 }
 
 pub(super) unsafe fn net_tcp_nodelay_impl(handle: i64, on: i64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -212,10 +225,11 @@ pub(super) unsafe fn net_tcp_nodelay_impl(handle: i64, on: i64) -> i64 {
 }
 
 pub(super) unsafe fn net_tcp_keepalive_impl(handle: i64, ms: u64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(socket) = ns.get_tcp_slot(handle) else {
         return -1;
     };
-    let Some(socket) = state::get_tcp_slot(handle) else {
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 

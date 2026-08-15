@@ -78,6 +78,7 @@ impl PhyManager {
     /// Fast path via STATUS register; does not touch the PHY directly.
     pub fn link_status(&mut self) -> LinkStatus {
         let mut result = LinkStatusResult::default();
+        // SAFETY: self.mmio_base is the owned, UC-mapped e1000e BAR; result is a valid, live local LinkStatusResult.
         unsafe {
             asm_intel_link_status(self.mmio_base, &mut result);
         }
@@ -96,6 +97,7 @@ impl PhyManager {
     }
 
     pub fn wait_for_link(&mut self, timeout_us: u64) -> Result<LinkStatus, ()> {
+        // SAFETY: self.mmio_base is the owned, UC-mapped e1000e BAR; spins on tsc_freq for its bounded timeout.
         let result = unsafe { asm_intel_wait_link(self.mmio_base, timeout_us, self.tsc_freq) };
 
         if result == 0 {
@@ -106,6 +108,7 @@ impl PhyManager {
     }
 
     pub fn read_reg(&self, reg: u32) -> Option<u16> {
+        // SAFETY: self.mmio_base is the owned, UC-mapped e1000e BAR; MDIC access spins on tsc_freq for its bounded timeout.
         let result = unsafe { asm_intel_phy_read(self.mmio_base, reg, self.tsc_freq) };
         if result != 0xFFFFFFFF {
             Some(result as u16)
@@ -115,6 +118,7 @@ impl PhyManager {
     }
 
     pub fn write_reg(&self, reg: u32, value: u16) -> Result<(), ()> {
+        // SAFETY: self.mmio_base is the owned, UC-mapped e1000e BAR; MDIC access spins on tsc_freq for its bounded timeout.
         let result =
             unsafe { asm_intel_phy_write(self.mmio_base, reg, value as u32, self.tsc_freq) };
         if result == 0 {

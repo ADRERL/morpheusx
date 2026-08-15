@@ -22,6 +22,7 @@ fn region_lba(partition_lba_start: u64, data_start_block: u64, dbs: u32, rel_blo
 fn entry_crc(e: &IndexEntry) -> u32 {
     let mut copy = *e;
     copy.crc32c = 0;
+    // SAFETY: IndexEntry is #[repr(C)] and exactly ENTRY_SIZE (512) bytes (asserted in types.rs).
     let bytes = unsafe { core::slice::from_raw_parts(&copy as *const _ as *const u8, ENTRY_SIZE) };
     crc32c(bytes)
 }
@@ -49,6 +50,7 @@ pub fn write_index_region<B: BlockIo>(
             }
             let mut e = entries[idx];
             e.crc32c = entry_crc(&e);
+            // SAFETY: IndexEntry is #[repr(C)] and exactly ENTRY_SIZE bytes.
             let bytes =
                 unsafe { core::slice::from_raw_parts(&e as *const _ as *const u8, ENTRY_SIZE) };
             buf[slot * ENTRY_SIZE..(slot + 1) * ENTRY_SIZE].copy_from_slice(bytes);
@@ -96,6 +98,9 @@ pub fn load_index_region<B: BlockIo>(
                 break;
             }
             let off = slot * ENTRY_SIZE;
+            // SAFETY: IndexEntry is #[repr(C)] POD, ENTRY_SIZE bytes; buf is a
+            // freshly read BLOCK_SIZE block and off+ENTRY_SIZE stays within it
+            // (loop bound is ENTRIES_PER_INDEX_BLOCK = BLOCK_SIZE/ENTRY_SIZE).
             let e: IndexEntry =
                 unsafe { core::ptr::read_unaligned(buf[off..].as_ptr() as *const IndexEntry) };
             if entry_crc(&e) != e.crc32c {

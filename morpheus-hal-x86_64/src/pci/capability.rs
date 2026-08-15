@@ -4,19 +4,6 @@ use super::config::{pci_cfg_read16, pci_cfg_read8, PciAddr};
 
 #[cfg(target_arch = "x86_64")]
 extern "win64" {
-    fn asm_pci_has_capabilities(bus: u8, device: u8, function: u8) -> u32;
-    fn asm_pci_get_cap_ptr(bus: u8, device: u8, function: u8) -> u32;
-    fn asm_pci_find_cap(bus: u8, device: u8, function: u8, cap_id: u8) -> u32;
-    fn asm_pci_find_virtio_cap(bus: u8, device: u8, function: u8, cfg_type: u8) -> u32;
-
-    fn asm_virtio_pci_parse_cap(
-        bus: u8,
-        device: u8,
-        function: u8,
-        cap_offset: u8,
-        out: *mut VirtioCapInfo,
-    ) -> u32;
-
     /// Returns RAX = address, RDX = 1 if memory / 0 if IO.
     fn asm_virtio_pci_read_bar(bus: u8, device: u8, function: u8, bar_idx: u8) -> u64;
 
@@ -90,49 +77,6 @@ impl VirtioPciCaps {
     pub fn isr_addr(&self) -> Option<u64> {
         self.isr
             .map(|i| self.bar_addrs[i.bar as usize] + i.offset as u64)
-    }
-}
-
-pub fn has_capabilities(addr: PciAddr) -> bool {
-    unsafe { asm_pci_has_capabilities(addr.bus, addr.device, addr.function) != 0 }
-}
-
-pub fn get_cap_ptr(addr: PciAddr) -> Option<u8> {
-    let ptr = unsafe { asm_pci_get_cap_ptr(addr.bus, addr.device, addr.function) };
-    if ptr != 0 && ptr < 256 {
-        Some(ptr as u8)
-    } else {
-        None
-    }
-}
-
-pub fn find_cap(addr: PciAddr, cap_id: u8) -> Option<u8> {
-    let offset = unsafe { asm_pci_find_cap(addr.bus, addr.device, addr.function, cap_id) };
-    if offset != 0 && offset < 256 {
-        Some(offset as u8)
-    } else {
-        None
-    }
-}
-
-pub fn find_virtio_cap(addr: PciAddr, cfg_type: u8) -> Option<u8> {
-    let offset = unsafe { asm_pci_find_virtio_cap(addr.bus, addr.device, addr.function, cfg_type) };
-    if offset != 0 && offset < 256 {
-        Some(offset as u8)
-    } else {
-        None
-    }
-}
-
-pub fn parse_virtio_cap(addr: PciAddr, cap_offset: u8) -> Option<VirtioCapInfo> {
-    let mut info = VirtioCapInfo::default();
-    let result = unsafe {
-        asm_virtio_pci_parse_cap(addr.bus, addr.device, addr.function, cap_offset, &mut info)
-    };
-    if result != 0 {
-        Some(info)
-    } else {
-        None
     }
 }
 

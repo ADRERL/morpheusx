@@ -560,7 +560,7 @@ pub(crate) unsafe fn net_drive() {
 /// Kernel-internal smoltcp pump for `epoll_wait`'s park loop: advance the stack and
 /// refresh member readiness with no `SYS_NET_POLL` syscall round-trip. Same body as
 /// the blocking socket ops' `net_drive`; runs in syscall (never IRQ) context, so it
-/// does not add a new class of `USER_NET_STACK` aliasing beyond the existing
+/// does not add a new class of net-state `SpinLock` contention beyond the existing
 /// socket-thread callers.
 pub(crate) unsafe fn net_pump() {
     net_drive();
@@ -729,10 +729,7 @@ pub unsafe fn sys_net_poll(subcmd: u64, a2: u64) -> u64 {
         NET_POLL_DRIVE => match NET_STACK_OPS.poll_drive {
             Some(f) => {
                 let rc = f(monotonic_ms());
-                // Recompute every socket's level mask post-poll: packet arrival never
-                // touches io::readiness on its own, so a userspace poller (mio/tokio)
-                // driving the stack via SYS_NET_POLL needs this to make epoll_wait
-                // event-driven (a SYN on a listener, RX data, connect-complete, FIN).
+                // See net_drive()'s comment on refresh_socket_readiness.
                 super::socket::refresh_socket_readiness();
                 if rc < 0 {
                     EIO

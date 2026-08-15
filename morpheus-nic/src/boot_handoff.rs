@@ -316,6 +316,7 @@ pub struct TscCalibration {
 #[cfg(target_arch = "x86_64")]
 pub fn has_invariant_tsc() -> bool {
     let result: u32;
+    // SAFETY: CPUID leaf 0x80000007 has no memory effects; rbx is saved/restored around the clobber per the win64/System V ABI.
     unsafe {
         core::arch::asm!(
             // Save rbx since LLVM uses it internally
@@ -344,6 +345,7 @@ pub fn has_invariant_tsc() -> bool {
 pub fn read_tsc_raw() -> u64 {
     let lo: u32;
     let hi: u32;
+    // SAFETY: RDTSC is a no-memory-effect, non-privileged instruction; only eax/edx are clobbered, both captured as outputs.
     unsafe {
         core::arch::asm!(
             "rdtsc",

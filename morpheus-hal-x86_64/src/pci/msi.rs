@@ -86,11 +86,6 @@ impl MsiCapability {
         mc |= 1; // MSI enable
         self.set_msg_ctrl(mc);
     }
-
-    pub fn disable(self) {
-        let mc = self.msg_ctrl();
-        self.set_msg_ctrl(mc & !1);
-    }
 }
 
 pub fn find_msi(addr: PciAddr) -> Option<MsiCapability> {
@@ -204,55 +199,6 @@ pub fn find_msix(addr: PciAddr) -> Option<MsixCapability> {
 pub enum MsiError {
     NoCapability,
     BarNotMemory,
-}
-
-/// Enable MSI-X with a single entry directed at `vector`; prefer over MSI.
-///
-/// # Safety
-/// MSI-X table BAR must be a memory BAR mapped UC. Config writes serialize via
-/// the port-I/O asm thunks.
-pub unsafe fn enable_msix_single(
-    addr: PciAddr,
-    target_apic_id: u32,
-    vector: u8,
-) -> Result<MsixCapability, MsiError> {
-    let cap = find_msix(addr).ok_or(MsiError::NoCapability)?;
-
-    // 1. Mask everything before touching the table.
-    cap.set_function_mask(true);
-    cap.set_enable(false);
-
-    // 2. Program entry 0.
-    cap.program_entry(
-        0,
-        lapic_msi_addr(target_apic_id),
-        vector,
-        /*masked=*/ false,
-    );
-
-    // 3. Disable legacy INTx so the device does not double-signal.
-    disable_intx(addr);
-
-    // 4. Enable, unmask function.
-    cap.set_enable(true);
-    cap.set_function_mask(false);
-
-    Ok(cap)
-}
-
-/// Fallback when MSI-X is absent: plain MSI, single vector.
-///
-/// # Safety
-/// See `enable_msix_single`.
-pub unsafe fn enable_msi_single(
-    addr: PciAddr,
-    target_apic_id: u32,
-    vector: u8,
-) -> Result<MsiCapability, MsiError> {
-    let cap = find_msi(addr).ok_or(MsiError::NoCapability)?;
-    cap.program(lapic_msi_addr(target_apic_id), vector);
-    disable_intx(addr);
-    Ok(cap)
 }
 
 /// Read a 32- or 64-bit memory BAR. Returns 0 for I/O-space BARs.

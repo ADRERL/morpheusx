@@ -324,8 +324,8 @@ pub fn chdir(path: &str) -> Result<(), u64> {
 }
 
 /// Enumerate `path` into `buf`; returns true child count (may exceed `max_entries`).
-/// `max_entries == 0` is count-only probe. Previously this was a 3-arg ABI without the
-/// capacity arg, leaving the bound register undefined — latent heap overflow.
+/// `max_entries == 0` is count-only probe. `max_entries` bounds how many entries the
+/// kernel writes into `buf`, so `buf` must be sized to hold at least that many.
 pub fn readdir(path: &str, buf: &mut [u8], max_entries: usize) -> Result<usize, u64> {
     let ret = unsafe {
         syscall4(
@@ -555,6 +555,8 @@ pub fn metadata(path: &str) -> error::Result<Metadata> {
     stat(path, &mut buf).map_err(Error::from_raw)?;
     // Kernel writes `FileStat` raw; reinterpret.
     let ptr = buf.as_ptr() as *const morpheus_foundation::types::FileStat;
+    // SAFETY: `ptr` points within `buf`, a 128B stack buffer the kernel just
+    // populated with a `FileStat` (a POD type); `stat()` succeeding guarantees it.
     Ok(Metadata(unsafe { core::ptr::read_unaligned(ptr) }))
 }
 
@@ -641,6 +643,8 @@ pub fn read_dir(path: &str) -> error::Result<ReadDir> {
         for i in 0..total {
             let offset = i * entry_size;
             let ptr = buf[offset..].as_ptr() as *const DirEntry;
+            // SAFETY: `i < total <= cap`, so `offset + entry_size <= buf.len()`; `buf`
+            // was populated by the kernel with `total` POD `DirEntry` records.
             entries.push(unsafe { core::ptr::read_unaligned(ptr) });
         }
         return Ok(ReadDir { entries, pos: 0 });

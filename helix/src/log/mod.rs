@@ -78,17 +78,6 @@ impl LogEngine {
         self.tail_segment = self.head_segment;
     }
 
-    /// Live segments (tail..=head) / total, percent. 100 = log full; warn near 80 for GC.
-    pub fn log_utilization_pct(&self) -> u32 {
-        let n = self.segment_count.max(1);
-        let used = if self.head_segment >= self.tail_segment {
-            self.head_segment - self.tail_segment + 1
-        } else {
-            n - self.tail_segment + self.head_segment + 1
-        };
-        ((used * 100) / n) as u32
-    }
-
     fn segment_remaining(&self) -> u32 {
         LOG_SEGMENT_BYTES as u32 - self.head_offset
     }
@@ -185,6 +174,8 @@ impl LogEngine {
                 crc32c: 0,
                 _reserved: [0; 20],
             };
+            // SAFETY: LogSegmentHeader is #[repr(C)]; size_of matches exactly,
+            // and write_buf (one full LOG_SEGMENT_BYTES) is larger than the header.
             let hdr_bytes = unsafe {
                 core::slice::from_raw_parts(
                     &seg_hdr as *const _ as *const u8,
@@ -195,6 +186,7 @@ impl LogEngine {
         }
 
         // CRC over header (with record_crc32c=0) + payload.
+        // SAFETY: LogRecordHeader is #[repr(C)] POD; size_of gives its exact byte extent.
         let hdr_bytes = unsafe {
             core::slice::from_raw_parts(
                 &header as *const _ as *const u8,
@@ -205,6 +197,7 @@ impl LogEngine {
 
         let off = self.head_offset as usize;
         let hdr_size = core::mem::size_of::<LogRecordHeader>();
+        // SAFETY: same as above — repr(C) header viewed for exactly its own size.
         let hdr_bytes_final =
             unsafe { core::slice::from_raw_parts(&header as *const _ as *const u8, hdr_size) };
         self.write_buf[off..off + hdr_size].copy_from_slice(hdr_bytes_final);
@@ -272,6 +265,9 @@ impl LogEngine {
 
         // Header may straddle a block boundary.
         let hdr_size = core::mem::size_of::<LogRecordHeader>();
+        // SAFETY: LogRecordHeader is #[repr(C)] POD; buf holds a freshly read
+        // BLOCK_SIZE block and the branch guard ensures hdr_size bytes from
+        // block_off are in range. read_unaligned sidesteps buf's byte alignment.
         let header: LogRecordHeader = if block_off + hdr_size <= BLOCK_SIZE as usize {
             unsafe {
                 core::ptr::read_unaligned(buf[block_off..].as_ptr() as *const LogRecordHeader)
@@ -286,6 +282,8 @@ impl LogEngine {
                 .read_blocks(lba2, &mut buf2)
                 .map_err(|_| HelixError::IoReadFailed)?;
             tmp[first_part..hdr_size].copy_from_slice(&buf2[..hdr_size - first_part]);
+            // SAFETY: tmp is a 64-byte local stitched from the two blocks
+            // straddling the header, i.e. hdr_size (64) valid bytes at offset 0.
             unsafe { core::ptr::read_unaligned(tmp.as_ptr() as *const LogRecordHeader) }
         };
 
@@ -325,6 +323,7 @@ impl LogEngine {
         let mut crc_buf = Vec::with_capacity(hdr_size + payload_len);
         let mut hdr_copy = header;
         hdr_copy.record_crc32c = 0;
+        // SAFETY: LogRecordHeader is #[repr(C)] POD; hdr_size is its exact size.
         let hdr_bytes =
             unsafe { core::slice::from_raw_parts(&hdr_copy as *const _ as *const u8, hdr_size) };
         crc_buf.extend_from_slice(hdr_bytes);
@@ -362,6 +361,8 @@ impl LogEngine {
             if (offset as usize) + hdr_size > self.write_buf.len() {
                 break;
             }
+            // SAFETY: LogRecordHeader is #[repr(C)] POD; the loop guard above
+            // ensures hdr_size bytes are available at offset within write_buf.
             let hdr: LogRecordHeader = unsafe {
                 core::ptr::read_unaligned(
                     self.write_buf[offset as usize..].as_ptr() as *const LogRecordHeader
@@ -443,6 +444,9 @@ impl LogEngine {
                 }
 
                 let off = offset as usize;
+                // SAFETY: LogRecordHeader is #[repr(C)] POD; the check above
+                // ((offset as usize) + hdr_size <= limit as usize) guarantees
+                // hdr_size bytes are available at off within buf.
                 let header: LogRecordHeader = unsafe {
                     core::ptr::read_unaligned(buf[off..].as_ptr() as *const LogRecordHeader)
                 };
@@ -465,6 +469,7 @@ impl LogEngine {
 
                 let mut hdr_copy = header;
                 hdr_copy.record_crc32c = 0;
+                // SAFETY: LogRecordHeader is #[repr(C)] POD; hdr_size is its exact size.
                 let hdr_bytes = unsafe {
                     core::slice::from_raw_parts(&hdr_copy as *const _ as *const u8, hdr_size)
                 };

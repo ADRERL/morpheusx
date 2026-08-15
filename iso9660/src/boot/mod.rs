@@ -1,6 +1,5 @@
 //! El Torito boot catalog and boot image extraction.
 
-pub mod catalog;
 pub mod entry;
 pub mod platform;
 pub mod validation;

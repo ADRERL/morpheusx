@@ -7,14 +7,24 @@ use super::{config, nic, state, tcp, udp_dns};
 unsafe fn activate_network_from_userspace() -> i64 {
     morpheus_hal_x86_64::serial::log_info("NET", 940, "userspace activation requested");
 
-    if state::has_driver() {
-        morpheus_hal_x86_64::serial::log_info("NET", 941, "already active");
-        return 1;
-    }
-
-    let Some((dma, tsc_freq)) = state::activation_context() else {
-        morpheus_hal_x86_64::serial::log_error("NET", 942, "activation failed: dma unavailable");
-        return -1;
+    let (dma, tsc_freq) = {
+        let ns = state::net();
+        // stack check too: activation moves driver into the stack, so a
+        // driver-only test would let a second sys_net_cfg rebuild the stack
+        // and orphan every live socket
+        if ns.driver.is_some() || ns.stack.is_some() {
+            morpheus_hal_x86_64::serial::log_info("NET", 941, "already active");
+            return 1;
+        }
+        let Some(dma) = ns.dma.clone() else {
+            morpheus_hal_x86_64::serial::log_error(
+                "NET",
+                942,
+                "activation failed: dma unavailable",
+            );
+            return -1;
+        };
+        (dma, ns.tsc_freq)
     };
 
     morpheus_hal_x86_64::serial::log_info(
@@ -22,13 +32,15 @@ unsafe fn activate_network_from_userspace() -> i64 {
         943,
         "probing NIC via network::probe_and_create_driver",
     );
-    let driver = match probe_and_create_driver(dma, tsc_freq) {
+    let mut intel_selected = false;
+    let driver = match probe_and_create_driver(&dma, tsc_freq) {
         Ok(ProbeResult::VirtIO(v)) => {
             morpheus_hal_x86_64::serial::log_info("NET", 949, "probe selected virtio NIC");
             UnifiedNetDevice::VirtIO(v)
         },
         Ok(ProbeResult::Intel(i)) => {
             morpheus_hal_x86_64::serial::log_info("NET", 951, "probe selected intel NIC");
+            intel_selected = true;
             UnifiedNetDevice::Intel(i)
         },
         Err(ProbeError::NoDevice) => {
@@ -61,8 +73,12 @@ unsafe fn activate_network_from_userspace() -> i64 {
     morpheus_hal_x86_64::serial::log_ok("NET", 945, "driver initialized");
 
     let stack = NetInterface::new(driver, NetConfig::dhcp());
-    state::clear_net_handle_tables();
-    state::set_stack(stack);
+    {
+        let mut ns = state::net();
+        ns.clear_net_handle_tables();
+        ns.stack = Some(stack);
+        ns.driver = None;
+    }
 
     morpheus_hal_x86_64::serial::log_info("NET", 946, "registering NIC ops");
     morpheus_kernel::syscall::handler::register_nic(morpheus_kernel::syscall::handler::NicOps {
@@ -108,6 +124,30 @@ unsafe fn activate_network_from_userspace() -> i64 {
         },
     );
 
+    // rx irq -> readiness::net_wake so parked epoll reactors wake on traffic;
+    // wire failure just leaves the polling backstop authoritative
+    if let Some(info) = intel_selected
+        .then(morpheus_nic::intel::find_intel_nic)
+        .flatten()
+    {
+        let dev = morpheus_hal_api::BusAddr::new(
+            info.pci_addr.bus,
+            info.pci_addr.device,
+            info.pci_addr.function,
+        );
+        let wired = morpheus_nic::intel::irq::wire_rx_irq(
+            morpheus_kernel::hal().intr(),
+            dev,
+            info.mmio_base,
+            morpheus_kernel::io::readiness::net_wake,
+        );
+        if wired {
+            morpheus_hal_x86_64::serial::log_ok("NET", 958, "rx irq wired (vector 0x41)");
+        } else {
+            morpheus_hal_x86_64::serial::log_warn("NET", 959, "rx irq unavailable; polling only");
+        }
+    }
+
     let _ = nic::user_net_refill();
 
     let link_now = nic::user_net_link_up();
@@ -124,6 +164,10 @@ pub(super) unsafe fn init_userspace_network_activation(
     dma: morpheus_virtio::dma::DmaRegion,
     tsc_freq: u64,
 ) {
-    state::set_activation_context(dma, tsc_freq);
+    {
+        let mut ns = state::net();
+        ns.dma = Some(dma);
+        ns.tsc_freq = tsc_freq;
+    }
     morpheus_kernel::syscall::handler::register_net_activation(activate_network_from_userspace);
 }

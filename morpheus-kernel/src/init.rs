@@ -56,12 +56,8 @@ pub unsafe fn init(hal: &'static dyn Hal, params: InitParams) {
 
 /// Phase 11b: bootloader calls this AFTER `hal.phys().reclaim_boot_services()`.
 ///
-/// Root mounting moved into the storage subsystem (`bootloader::storage`): root
-/// is itself a staged `storage::mount` (spec §5/§7) chosen there from the pre-EBS
-/// image, a real disk holding `/bin/init`, or a fresh RAM helix. The old
-/// `init_root_fs` RAM-root allocation is now the `VOLUME_NONE` fresh-helix path,
-/// allocated through the staging admission control. Kept as a no-op hook so the
-/// bootloader call site and phase ordering stay intact.
+/// No-op: root selection/mount is owned by `bootloader::storage::mount` (spec
+/// §5/§7). Kept so the call site and phase ordering stay intact.
 ///
 /// # Safety
 /// BSP, post-late_init, post-reclaim.

@@ -86,6 +86,7 @@ const CMD_INDEX: u16 = 0x10;
 const ACMD41_OCR: u32 = 0x40FF_8000;
 
 impl SdhciDriver {
+    // SAFETY: pure address arithmetic, no dereference; off is a fixed register offset within the SDHCI register block.
     #[inline(always)]
     unsafe fn reg32(&self, off: u64) -> u64 {
         self.mmio_base + off
@@ -95,6 +96,7 @@ impl SdhciDriver {
         self.tsc_freq.saturating_mul(ms) / 1000
     }
 
+    // SAFETY: self.mmio_base is the owned, UC-mapped SDHCI BAR validated in new(); PRESENT_STATE is a fixed, always-readable register.
     unsafe fn wait_not_inhibit(&self, timeout_ms: u64) -> Result<(), SdhciInitError> {
         let start = tsc::read_tsc();
         let timeout = self.timeout_ticks(timeout_ms);
@@ -110,10 +112,12 @@ impl SdhciDriver {
         }
     }
 
+    // SAFETY: self.mmio_base is the owned, UC-mapped SDHCI BAR validated in new(); INT_STATUS is a fixed, write-1-to-clear register.
     unsafe fn clear_ints(&self) {
         mmio::write32(self.reg32(REG_INT_STATUS), 0xFFFF_FFFF);
     }
 
+    // SAFETY: self.mmio_base is the owned, UC-mapped SDHCI BAR validated in new(); ARGUMENT/COMMAND/INT_STATUS/RESPONSE0 are fixed registers; the poll loop is TSC-bounded.
     unsafe fn send_cmd(
         &self,
         index: u8,
@@ -149,6 +153,7 @@ impl SdhciDriver {
     }
 
     /// SD spec 4.7 init sequence: CMD0 → CMD8 → ACMD41 → CMD2/CMD3/CMD7, CMD16 for SDSC.
+    // SAFETY: self.mmio_base is the owned, UC-mapped SDHCI BAR validated in new(); only calls send_cmd, itself sound under the same contract.
     unsafe fn init_card(&mut self) -> Result<(), SdhciInitError> {
         let _ = self.send_cmd(0, 0, CMD_RESP_NONE, 100)?;
 
@@ -255,6 +260,7 @@ impl BlockDriverInit for SdhciDriver {
         &[]
     }
 
+    // SAFETY: delegates to Self::new, whose contract (mmio_base is the valid, mapped SDHCI base, config.tsc_freq calibrated) is the caller's obligation per BlockDriverInit::create's doc.
     unsafe fn create(mmio_base: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(mmio_base, config)
     }
@@ -303,6 +309,7 @@ impl BlockDriver for SdhciDriver {
                     .checked_mul(self.info.sector_size as u64)
                     .ok_or(BlockError::InvalidSector)?
             };
+            // SAFETY: self.mmio_base is the owned, UC-mapped SDHCI BAR validated in new(); curr_dst is caller-supplied buffer_phys, checked non-zero and bounds-checked against total_sectors above.
             let rc =
                 unsafe { asm_sdhci_read_block_pio(self.mmio_base, arg, curr_dst, self.tsc_freq) };
             if rc != 0 {

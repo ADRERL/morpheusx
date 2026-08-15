@@ -40,6 +40,7 @@ fn register_in_table<T: Copy + PartialEq>(table: &mut [Option<T>], handler: T) {
 
 pub fn register_prepare_handler(handler: PrepareHandler) {
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         register_in_table(&mut PREPARE_HANDLERS, handler);
     }
@@ -48,6 +49,7 @@ pub fn register_prepare_handler(handler: PrepareHandler) {
 
 pub fn register_restart_handler(handler: FinalHandler) {
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         register_in_table(&mut RESTART_HANDLERS, handler);
     }
@@ -56,6 +58,7 @@ pub fn register_restart_handler(handler: FinalHandler) {
 
 pub fn register_poweroff_handler(handler: FinalHandler) {
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         register_in_table(&mut POWEROFF_HANDLERS, handler);
     }
@@ -82,6 +85,7 @@ pub fn run_prepare_handlers(kind: TransitionKind, timeout_ms: u64) -> bool {
     let mut all_ok = true;
 
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         for handler in PREPARE_HANDLERS.iter().flatten() {
             if let Some(d) = deadline {
@@ -104,6 +108,7 @@ pub fn run_prepare_handlers(kind: TransitionKind, timeout_ms: u64) -> bool {
 
 pub fn run_restart_handlers(kind: TransitionKind) {
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         for handler in RESTART_HANDLERS.iter().flatten() {
             handler(kind);
@@ -114,6 +119,7 @@ pub fn run_restart_handlers(kind: TransitionKind) {
 
 pub fn run_poweroff_handlers(kind: TransitionKind) {
     SHUTDOWN_HANDLER_LOCK.lock();
+    // SAFETY: SHUTDOWN_HANDLER_LOCK is held for the whole static-mut access.
     unsafe {
         for handler in POWEROFF_HANDLERS.iter().flatten() {
             handler(kind);

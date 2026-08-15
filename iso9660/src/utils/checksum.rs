@@ -15,12 +15,6 @@ pub fn verify_checksum_16(data: &[u8]) -> bool {
     checksum_16(data) == 0
 }
 
-/// Value that, when added, makes the total sum zero.
-pub fn calculate_complement_16(data: &[u8]) -> u16 {
-    let sum = checksum_16(data);
-    0u16.wrapping_sub(sum)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

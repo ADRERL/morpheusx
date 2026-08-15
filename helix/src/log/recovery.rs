@@ -29,6 +29,9 @@ pub fn recover_superblock<B: BlockIo>(
     block_io
         .read_blocks(lba_a, &mut buf)
         .map_err(|_| HelixError::IoReadFailed)?;
+    // SAFETY: buf is a freshly read BLOCK_SIZE-byte block and HelixSuperblock
+    // is #[repr(C)] POD of exactly that size; read_unaligned avoids requiring
+    // buf's (Vec<u8>, alignment 1) pointer to satisfy the struct's alignment.
     let sb_a: HelixSuperblock =
         unsafe { core::ptr::read_unaligned(buf.as_ptr() as *const HelixSuperblock) };
     let a_valid = sb_a.is_valid();
@@ -37,6 +40,7 @@ pub fn recover_superblock<B: BlockIo>(
     block_io
         .read_blocks(lba_b, &mut buf)
         .map_err(|_| HelixError::IoReadFailed)?;
+    // SAFETY: same as sb_a above — buf holds one freshly read BLOCK_SIZE block.
     let sb_b: HelixSuperblock =
         unsafe { core::ptr::read_unaligned(buf.as_ptr() as *const HelixSuperblock) };
     let b_valid = sb_b.is_valid();
@@ -73,6 +77,7 @@ pub fn write_superblock<B: BlockIo>(
     };
     let lba = Lba(partition_lba_start + block * blocks_per_sector);
 
+    // SAFETY: sb is #[repr(C)] and sized exactly BLOCK_SIZE (asserted in types.rs).
     let bytes =
         unsafe { core::slice::from_raw_parts(sb as *const _ as *const u8, BLOCK_SIZE as usize) };
     block_io

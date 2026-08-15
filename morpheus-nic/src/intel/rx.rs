@@ -75,6 +75,7 @@ impl RxRing {
             let desc_ptr = self.desc_ptr(i);
             let buffer_bus = self.buffer_bus_addr(i);
 
+            // SAFETY: desc_ptr/buffer_bus index the driver's owned RX descriptor ring and buffer pool, bounded by queue_size.
             unsafe {
                 asm_intel_rx_init_desc(desc_ptr, buffer_bus);
             }
@@ -89,6 +90,7 @@ impl RxRing {
     /// Call after init_descriptors. Tail = last valid descriptor.
     pub fn update_tail(&mut self) {
         self.tail = self.queue_size - 1;
+        // SAFETY: mmio_base is the owned, UC-mapped e1000e BAR; writes RDT only.
         unsafe {
             asm_intel_rx_update_tail(self.mmio_base, self.tail as u32);
         }
@@ -103,6 +105,7 @@ impl RxRing {
         let desc_ptr = self.desc_ptr(self.next_to_clean);
         let mut result = RxPollResult::default();
 
+        // SAFETY: desc_ptr indexes within the driver's owned RX descriptor ring; result is a valid, live local RxPollResult.
         unsafe { asm_intel_rx_poll(desc_ptr, &mut result) != 0 }
     }
 
@@ -112,6 +115,7 @@ impl RxRing {
         let mut result = RxPollResult::default();
 
         // Poll includes lfence.
+        // SAFETY: desc_ptr indexes within the driver's owned RX descriptor ring; result is a valid, live local RxPollResult.
         let has_packet = unsafe { asm_intel_rx_poll(desc_ptr, &mut result) };
 
         if has_packet == 0 {
@@ -139,6 +143,7 @@ impl RxRing {
         lfence();
 
         let buffer_ptr = self.buffer_cpu_ptr(desc_idx);
+        // SAFETY: length <= out_buffer.len() (checked above) and length <= buffer_size (device-reported, within the DMA slot); out_buffer is caller-owned and non-overlapping.
         unsafe {
             core::ptr::copy_nonoverlapping(buffer_ptr, out_buffer.as_mut_ptr(), length);
         }
@@ -152,6 +157,7 @@ impl RxRing {
     fn release_descriptor(&mut self, idx: u16) {
         let desc_ptr = self.desc_ptr(idx);
 
+        // SAFETY: desc_ptr indexes within the driver's owned RX descriptor ring.
         unsafe {
             asm_intel_rx_clear_desc(desc_ptr);
         }
@@ -163,6 +169,7 @@ impl RxRing {
         self.tail = idx;
 
         if self.tail != old_tail {
+            // SAFETY: mmio_base is the owned, UC-mapped e1000e BAR; writes RDT only.
             unsafe {
                 asm_intel_rx_update_tail(self.mmio_base, self.tail as u32);
             }
@@ -171,6 +178,7 @@ impl RxRing {
 
     #[inline]
     fn desc_ptr(&self, idx: u16) -> *mut u8 {
+        // SAFETY: idx < queue_size (caller-maintained invariant); desc_cpu spans queue_size * RX_DESC_SIZE bytes of the driver's owned DMA region.
         unsafe { self.desc_cpu.add((idx as usize) * RX_DESC_SIZE) }
     }
 
@@ -181,6 +189,7 @@ impl RxRing {
 
     #[inline]
     fn buffer_cpu_ptr(&self, idx: u16) -> *const u8 {
+        // SAFETY: idx < queue_size (caller-maintained invariant); buffer_cpu spans queue_size * buffer_size bytes of the driver's owned DMA region.
         unsafe { self.buffer_cpu.add((idx as usize) * self.buffer_size) }
     }
 }

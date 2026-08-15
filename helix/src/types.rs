@@ -20,16 +20,6 @@ pub const MAX_PATH_LEN: usize = 255;
 /// Bytes of file data inlined in an `IndexEntry`.
 pub const INLINE_DATA_SIZE: usize = 96;
 
-/// 4096 / 24 = 170 entries; leave room for header.
-pub const EXTENTS_PER_NODE: usize = 168;
-
-/// ~4096 / (8 key + 8 child + padding).
-pub const BTREE_ORDER: usize = 204;
-
-pub const MAX_FDS: usize = 64;
-pub const MAX_MOUNTS: usize = 16;
-pub const MAX_SNAPSHOTS: usize = 256;
-
 pub const SUPERBLOCK_A_BLOCK: u64 = 0;
 pub const SUPERBLOCK_B_BLOCK: u64 = 1;
 
@@ -37,8 +27,6 @@ pub type Lsn = u64;
 pub type BlockAddr = u64;
 
 pub const BLOCK_NULL: BlockAddr = u64::MAX;
-
-pub const ROOT_DIR_KEY: u64 = 1;
 
 /// 4 KiB superblock. Two copies (block 0 / 1) written alternately so at
 /// least one is always valid.
@@ -114,6 +102,8 @@ impl HelixSuperblock {
 
     pub fn update_crc(&mut self) {
         self.crc32c = 0;
+        // SAFETY: HelixSuperblock is #[repr(C)] and sized exactly BLOCK_SIZE
+        // (asserted above), so the whole struct can be viewed as a byte slice.
         let bytes = unsafe {
             core::slice::from_raw_parts(self as *const _ as *const u8, BLOCK_SIZE as usize)
         };
@@ -123,6 +113,7 @@ impl HelixSuperblock {
     pub fn verify_crc(&self) -> bool {
         let mut copy = *self;
         copy.crc32c = 0;
+        // SAFETY: same as update_crc — repr(C) struct exactly BLOCK_SIZE bytes.
         let bytes = unsafe {
             core::slice::from_raw_parts(&copy as *const _ as *const u8, BLOCK_SIZE as usize)
         };
@@ -141,20 +132,6 @@ impl fmt::Debug for HelixSuperblock {
             .finish()
     }
 }
-
-/// Named snapshot: label + LSN, stored in a flat on-disk table.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SnapshotEntry {
-    pub name: [u8; 64],
-    pub lsn: Lsn,
-    pub timestamp_ns: u64,
-    /// B-tree root at this LSN for fast snapshot mount.
-    pub index_root: BlockAddr,
-    pub _pad: [u8; 40],
-}
-
-const _ASSERT_SNAP_SIZE: () = assert!(core::mem::size_of::<SnapshotEntry>() == 128);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -264,9 +241,6 @@ pub mod entry_flags {
     pub const IS_DIR: u32 = 1 << 0;
     pub const IS_DELETED: u32 = 1 << 1;
     pub const IS_INLINE: u32 = 1 << 2;
-    /// Synthetic VFS node (e.g. /sys).
-    pub const IS_SYS: u32 = 1 << 3;
-    pub const IS_DEDUP: u32 = 1 << 4;
     /// `extent_root` addresses an extent-node block, not a contiguous run.
     pub const IS_EXTENT_NODE: u32 = 1 << 5;
 }
@@ -309,36 +283,6 @@ pub struct IndexEntry {
 
 const _ASSERT_ENTRY_SIZE: () = assert!(core::mem::size_of::<IndexEntry>() == 512);
 
-/// B-tree internal node header. Block layout:
-/// `[header(32)][keys: u64 × ORDER][children: u64 × (ORDER+1)]`.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct BTreeNodeHeader {
-    /// 0x01 internal, 0x02 leaf.
-    pub node_type: u8,
-    pub _pad: [u8; 3],
-    pub key_count: u32,
-    /// Self-block; validates the block was read from where we expected.
-    pub self_block: BlockAddr,
-    pub crc32c: u32,
-    pub _reserved: [u8; 12],
-}
-
-const _ASSERT_BTREE_HDR: () = assert!(core::mem::size_of::<BTreeNodeHeader>() == 32);
-
-pub const NODE_INTERNAL: u8 = 0x01;
-pub const NODE_LEAF: u8 = 0x02;
-
-/// Internal node: header + keys[ORDER] + children[ORDER+1].
-///
-/// With ORDER=253: header(32) + keys(253×8=2024) + children(254×8=2032) = 4088 ≤ 4096.
-pub const INTERNAL_ORDER: usize = 253;
-
-/// Leaf node: header + entries.
-///
-/// With 512-byte entries: (4096 - 32) / 512 = 7 entries per leaf block.
-pub const LEAF_ENTRIES_PER_BLOCK: usize = 7;
-
 /// A single extent: a contiguous run of data blocks.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -380,51 +324,6 @@ pub const EXTENTS_PER_LEAF: usize = 170;
 /// re-export keeps the `helix::types::open_flags::*` path while single-sourcing
 /// the values.
 pub use morpheus_foundation::flags::open_flags;
-
-/// A file descriptor — per-process, in-memory only.
-#[derive(Clone, Copy, Debug)]
-pub struct FileDescriptor {
-    /// Index entry key (path hash) this fd refers to.
-    pub key: u64,
-    /// Full path for safe index lookups (avoids hash-collision issues).
-    pub path: [u8; 256],
-    /// Open flags.
-    pub flags: u32,
-    /// Current seek offset in bytes.
-    pub offset: u64,
-    /// Mount table index (which filesystem instance).
-    pub mount_idx: u8,
-    /// Padding.
-    pub _pad: [u8; 3],
-    /// For O_AT_LSN: the pinned LSN for temporal reads.
-    pub pinned_lsn: Lsn,
-}
-
-impl FileDescriptor {
-    pub const fn empty() -> Self {
-        FileDescriptor {
-            key: 0,
-            path: [0u8; 256],
-            flags: 0,
-            offset: 0,
-            mount_idx: 0,
-            _pad: [0; 3],
-            pinned_lsn: 0,
-        }
-    }
-
-    pub fn is_open(&self) -> bool {
-        self.flags != 0
-    }
-
-    pub fn is_readable(&self) -> bool {
-        self.flags & open_flags::O_READ != 0
-    }
-
-    pub fn is_writable(&self) -> bool {
-        self.flags & open_flags::O_WRITE != 0
-    }
-}
 
 // Canonical kernel↔userland FFI types, syscall numbers, and seek whence all live
 // in morpheus-foundation — the single source of truth. Re-exported (not

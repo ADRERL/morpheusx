@@ -2,6 +2,7 @@
 
 pub mod e1000e;
 pub mod init;
+pub mod irq;
 pub mod phy;
 pub mod regs;
 pub mod rx;
@@ -149,6 +150,7 @@ pub fn validate_mmio_access(mmio_base: u64) -> bool {
 
     const STATUS_OFFSET: u64 = 0x0008;
 
+    // SAFETY: mmio_base is the candidate device's UC-mapped MMIO BAR; STATUS is a fixed, always-readable offset used purely to probe device presence.
     let status = unsafe { read32(mmio_base + STATUS_OFFSET) };
     status != 0xFFFFFFFF && status != 0x00000000
 }

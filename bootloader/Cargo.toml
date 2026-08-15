@@ -26,7 +26,6 @@ morpheus-hal-api = { workspace = true }
 morpheus-xhci = { workspace = true }
 morpheus-net-stack = { workspace = true }
 morpheus-nic = { workspace = true }
-morpheus-ui = { workspace = true }
 morpheus-virtio = { workspace = true }
 # GPT disk I/O traits for direct use (replaces morpheus_network::GptBlockIo / GptLba shims).
 gpt_disk_io.workspace = true

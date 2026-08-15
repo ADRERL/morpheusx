@@ -139,7 +139,9 @@ extern "win64" {
     /// Reads PHY_ID1; nonzero result means alive. e1000_phy_is_accessible_pchlan.
     pub fn asm_intel_phy_is_accessible(mmio_base: u64, tsc_freq: u64) -> u32;
     /// EXTCNF_CTRL.SWFLAG. Required gate for PHY/NVM access on ICH8+/PCH.
+    #[allow(dead_code)]
     pub fn asm_intel_acquire_swflag(mmio_base: u64, tsc_freq: u64) -> u32;
+    #[allow(dead_code)]
     pub fn asm_intel_release_swflag(mmio_base: u64);
     /// I218 sometimes only answers via SMBus.
     pub fn asm_intel_force_smbus_mode(mmio_base: u64);
@@ -147,50 +149,8 @@ extern "win64" {
 }
 
 #[inline]
-pub fn reset(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
-    let result = unsafe { asm_intel_reset(mmio_base, tsc_freq) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-#[inline]
-pub fn read_mac(mmio_base: u64) -> Option<[u8; 6]> {
-    let mut mac = [0u8; 6];
-    let result = unsafe { asm_intel_read_mac(mmio_base, &mut mac) };
-    if result == 0 {
-        Some(mac)
-    } else {
-        None
-    }
-}
-
-#[inline]
-pub fn write_mac(mmio_base: u64, mac: &[u8; 6]) {
-    unsafe { asm_intel_write_mac(mmio_base, mac) };
-}
-
-#[inline]
-pub fn get_link_status(mmio_base: u64) -> LinkStatusResult {
-    let mut result = LinkStatusResult::default();
-    unsafe { asm_intel_link_status(mmio_base, &mut result) };
-    result
-}
-
-#[inline]
-pub fn wait_for_link(mmio_base: u64, timeout_us: u64, tsc_freq: u64) -> Result<(), ()> {
-    let result = unsafe { asm_intel_wait_link(mmio_base, timeout_us, tsc_freq) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-#[inline]
 pub fn phy_read(mmio_base: u64, reg: u32, tsc_freq: u64) -> Option<u16> {
+    // SAFETY: mmio_base is the caller's owned, UC-mapped e1000e BAR; asm_intel_phy_read only touches the MDIC register and spins on tsc_freq for its bounded timeout.
     let result = unsafe { asm_intel_phy_read(mmio_base, reg, tsc_freq) };
     if result != 0xFFFFFFFF {
         Some(result as u16)
@@ -201,6 +161,7 @@ pub fn phy_read(mmio_base: u64, reg: u32, tsc_freq: u64) -> Option<u16> {
 
 #[inline]
 pub fn phy_write(mmio_base: u64, reg: u32, value: u16, tsc_freq: u64) -> Result<(), ()> {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; asm_intel_phy_write only touches the MDIC register and spins on tsc_freq for its bounded timeout.
     let result = unsafe { asm_intel_phy_write(mmio_base, reg, value as u32, tsc_freq) };
     if result == 0 {
         Ok(())
@@ -212,6 +173,7 @@ pub fn phy_write(mmio_base: u64, reg: u32, value: u16, tsc_freq: u64) -> Result<
 /// Wake the I218 PHY from ULP. T450s etc. won't talk MDIC without this.
 #[inline]
 pub fn disable_ulp(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; asm_intel_disable_ulp only touches PHY/NVM control registers and spins on tsc_freq for its bounded timeout.
     let result = unsafe { asm_intel_disable_ulp(mmio_base, tsc_freq) };
     if result == 0 {
         Ok(())
@@ -223,6 +185,7 @@ pub fn disable_ulp(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
 /// Last resort when the PHY is unresponsive.
 #[inline]
 pub fn toggle_lanphypc(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; asm_intel_toggle_lanphypc only touches CTRL.LANPHYPC and spins on tsc_freq for its bounded timeout.
     let result = unsafe { asm_intel_toggle_lanphypc(mmio_base, tsc_freq) };
     if result == 0 {
         Ok(())
@@ -233,32 +196,19 @@ pub fn toggle_lanphypc(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
 
 #[inline]
 pub fn phy_is_accessible(mmio_base: u64, tsc_freq: u64) -> bool {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; asm_intel_phy_is_accessible reads PHY_ID1 via MDIC and spins on tsc_freq for its bounded timeout.
     let result = unsafe { asm_intel_phy_is_accessible(mmio_base, tsc_freq) };
     result != 0
 }
 
-/// Acquire EXTCNF_CTRL.SWFLAG. Required before PHY/NVM access on ICH8+/PCH.
-#[inline]
-pub fn acquire_swflag(mmio_base: u64, tsc_freq: u64) -> Result<(), ()> {
-    let result = unsafe { asm_intel_acquire_swflag(mmio_base, tsc_freq) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-#[inline]
-pub fn release_swflag(mmio_base: u64) {
-    unsafe { asm_intel_release_swflag(mmio_base) };
-}
-
 #[inline]
 pub fn force_smbus_mode(mmio_base: u64) {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; writes CTRL_EXT SMBus-mode bits only.
     unsafe { asm_intel_force_smbus_mode(mmio_base) };
 }
 
 #[inline]
 pub fn clear_smbus_mode(mmio_base: u64) {
+    // SAFETY: mmio_base is owned, UC-mapped e1000e BAR; writes CTRL_EXT SMBus-mode bits only.
     unsafe { asm_intel_clear_smbus_mode(mmio_base) };
 }

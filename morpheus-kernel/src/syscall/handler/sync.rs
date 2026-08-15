@@ -4,7 +4,6 @@ use super::common::*;
 use super::fb::is_composited_client;
 use crate::hal;
 use crate::mouse;
-use crate::process;
 use crate::process::{BlockReason, ProcessState};
 use crate::schedular::{PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER};
 use morpheus_hal_api::Pml4Handle;
@@ -196,7 +195,6 @@ pub unsafe fn sys_mouse_read() -> u64 {
         return (dx16 as u64) | ((dy16 as u64) << 16) | ((buttons as u64) << 32);
     }
     let (dx, dy, buttons, wheel) = mouse::drain();
-    let _ = process::ProcessState::Ready; // touch to keep import used
     let dx16 = (dx.clamp(-32768, 32767) as i16) as u16;
     let dy16 = (dy.clamp(-32768, 32767) as i16) as u16;
     let wheel8 = (wheel.clamp(-128, 127) as i8) as u8;

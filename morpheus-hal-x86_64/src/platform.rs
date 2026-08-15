@@ -487,8 +487,8 @@ pub unsafe fn platform_init_selfcontained(
     boot_step_ok("dma region");
     checkpoint("phase7-pci-begin");
 
-    enable_all_pci_devices();
-    boot_step_ok("pci bus");
+    quiesce_pci_busmasters();
+    boot_step_ok("pci quiesce");
     checkpoint("phase7-done");
 
     checkpoint("phase8-paging-begin");
@@ -535,6 +535,9 @@ pub unsafe fn platform_init_selfcontained(
                             log_warn("USB", 901, "TSC calibration failed for USB");
                             continue;
                         }
+
+                        // re-arm after the phase 7 quiesce; we own it now
+                        enable_bus_mastering(addr);
 
                         // SAFETY: BAR0 masked to MMIO base; tsc_freq != 0 by check above.
                         match unsafe { XhciController::new(base_addr as u64, tsc_freq) } {
@@ -621,11 +624,24 @@ pub unsafe fn platform_init_selfcontained(
     })
 }
 
-/// Enable MEM + bus mastering on every non-bridge function.
+/// Clear Bus Master Enable on every endpoint the kernel does not yet own.
+///
+/// Firmware (PXE/UNDI, storage oproms) can leave DMA engines armed with ring
+/// pointers into BootServicesData; UEFI drivers are supposed to stop DMA at
+/// ExitBootServices but on real silicon frequently don't. An armed engine
+/// stomps whatever those regions get repurposed for (observed: buddy FreeNodes
+/// after the phase 10.5 reclaim → free-list corruption on real Intel; QEMU
+/// never arms devices so it can't reproduce). Each driver re-enables BME on
+/// the specific function it claims (xHCI phase 9, AHCI/NIC/virtio probes).
+///
+/// Skipped classes: 0x06 bridges (BME there forwards subordinate traffic, and
+/// toggling it has triggered IOMMU faults + stray DMA from shadow BARs) and
+/// 0x03 display (some IGD parts gate scanout reads on BME; a GPU is not the
+/// stray-DMA threat here).
 ///
 /// # Safety
 /// PCI config space accessible (always on x86_64).
-unsafe fn enable_all_pci_devices() -> usize {
+unsafe fn quiesce_pci_busmasters() -> usize {
     let mut count = 0usize;
 
     for bus in 0..=255u8 {
@@ -637,8 +653,7 @@ unsafe fn enable_all_pci_devices() -> usize {
                 continue;
             }
 
-            maybe_enable_bus_mastering(addr);
-            count += 1;
+            count += maybe_clear_bus_mastering(addr) as usize;
 
             // Multi-function bit.
             let header_type = pci_cfg_read16(addr, offset::HEADER_TYPE) as u8;
@@ -647,8 +662,7 @@ unsafe fn enable_all_pci_devices() -> usize {
                     let faddr = PciAddr::new(bus, device, function);
                     let v = pci_cfg_read16(faddr, offset::VENDOR_ID);
                     if v != 0xFFFF && v != 0x0000 {
-                        maybe_enable_bus_mastering(faddr);
-                        count += 1;
+                        count += maybe_clear_bus_mastering(faddr) as usize;
                     }
                 }
             }
@@ -658,14 +672,17 @@ unsafe fn enable_all_pci_devices() -> usize {
     count
 }
 
-/// Skip class 0x06 (bridges). Toggling BM on host/PCI-PCI/ISA bridges has
-/// triggered IOMMU faults + stray DMA from shadow BARs on real silicon.
-fn maybe_enable_bus_mastering(addr: PciAddr) {
+fn maybe_clear_bus_mastering(addr: PciAddr) -> bool {
     let class = pci_cfg_read8(addr, 0x0B);
-    if class == 0x06 {
-        return;
+    if class == 0x06 || class == 0x03 {
+        return false;
     }
-    enable_bus_mastering(addr);
+    let cmd = pci_cfg_read16(addr, offset::COMMAND);
+    if cmd & CMD_BUS_MASTER != 0 {
+        pci_cfg_write16(addr, offset::COMMAND, cmd & !CMD_BUS_MASTER);
+        return true;
+    }
+    false
 }
 
 fn enable_bus_mastering(addr: PciAddr) {

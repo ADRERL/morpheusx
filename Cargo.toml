@@ -34,7 +34,6 @@ license = "GPLv3"
 
 [workspace.dependencies]
 morpheus-persistent = { path = "persistent" }
-morpheus-updater = { path = "updater" }
 morpheus-display = { path = "display", features = ["framebuffer-backend"] }
 iso9660 = { path = "iso9660", package = "iso9660-rs" }
 morpheus-ui = { path = "ui" }

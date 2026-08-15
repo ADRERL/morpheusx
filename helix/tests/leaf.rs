@@ -19,6 +19,8 @@ fn segment_header_valid_after_flush() {
 
     let seg0 = fs.sb.log_start_block as usize * 4096;
     let bytes = dev.peek(seg0, 64);
+    // SAFETY: LogSegmentHeader is #[repr(C)] POD, exactly 64 bytes; `bytes` is
+    // a 64-byte peek of the on-disk segment header just flushed above.
     let hdr: LogSegmentHeader =
         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const LogSegmentHeader) };
 

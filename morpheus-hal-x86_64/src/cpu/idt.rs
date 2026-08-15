@@ -369,6 +369,9 @@ fn build_explanation(vec: u64, ec: u64, cr2: u64, user: bool, buf: &mut [u8; 256
 /// Kernel-mode RBP frame walk. Strict alignment + range check to avoid faulting.
 // real toolchain is 1.92
 #[allow(clippy::incompatible_msrv)]
+// SAFETY: caller must pass an RBP that is either 0 or a genuine frame-chain
+// head; the range/alignment checks below bound the walk but cannot prove the
+// chain isn't corrupted, so a wild read is possible on a bogus frame pointer.
 unsafe fn walk_stack(rbp: u64, out: &mut [u64; 16]) -> u8 {
     let mut fp = rbp;
     let mut depth: u8 = 0;
@@ -425,6 +428,8 @@ pub extern "C" fn exception_handler(
     newline();
 
     let (cr2, cr3): (u64, u64);
+    // SAFETY: CR2/CR3 reads are non-trapping in any privilege level running
+    // this handler; no side effects on the register state being reported.
     unsafe {
         core::arch::asm!("mov {}, cr2", out(reg) cr2);
         core::arch::asm!("mov {}, cr3", out(reg) cr3);
@@ -523,6 +528,10 @@ pub extern "C" fn exception_handler(
 
     // Page fault diagnostic: full page table walk from CR3 for CR2
     if vector == 14 {
+        // SAFETY: CR3 and each walked entry's physical base are read as raw
+        // identity-mapped pointers with no validation beyond the P bit; a
+        // corrupted table can fault again here, which is accepted — this is
+        // a best-effort diagnostic dump already running in a fault handler.
         unsafe {
             puts("  ── PT walk for CR2 ──\n");
             let va = cr2;
@@ -602,6 +611,8 @@ pub extern "C" fn exception_handler(
     // Backtrace (kernel only — user pages may be unmapped)
     let mut backtrace = [0u64; 16];
     let backtrace_depth = if !is_user_mode {
+        // SAFETY: kernel-mode saved.rbp is a real frame pointer from a live
+        // (possibly corrupted, hence the walk's own bounds checks) call chain.
         unsafe { walk_stack(saved.rbp, &mut backtrace) }
     } else {
         0
@@ -662,6 +673,8 @@ pub extern "C" fn exception_handler(
         puts("[EXC] user fault -> terminating PID ");
         put_hex32(pid);
         puts("\n");
+        // SAFETY: PROCESS_EXIT_HOOK is a set-once global installed before any
+        // user process runs; calling it here does not return on success.
         unsafe {
             if let Some(h) = PROCESS_EXIT_HOOK {
                 h(code);
@@ -671,6 +684,8 @@ pub extern "C" fn exception_handler(
         }
     }
 
+    // SAFETY: CRASH_HOOK is a set-once global; `info` is a fully-initialized
+    // local, valid for the duration of this call.
     unsafe {
         if let Some(hook) = CRASH_HOOK {
             hook(&info);
@@ -678,6 +693,8 @@ pub extern "C" fn exception_handler(
     }
 
     if RESET_ON_CRASH.load(Ordering::Relaxed) {
+        // SAFETY: we are already crashing and about to halt/reset; issuing
+        // I/O and a machine reset here has no further-state requirements.
         unsafe {
             crate::cpu::reset::wait_for_keypress_or_timeout_ms(10_000);
             crate::cpu::reset::reset_machine_now();

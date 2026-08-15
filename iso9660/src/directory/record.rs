@@ -86,11 +86,6 @@ impl DirectoryRecord {
         }
     }
 
-    /// Whether the directory flag bit is set on this record.
-    pub fn is_directory(&self) -> bool {
-        self.file_flags & 0x02 != 0
-    }
-
     /// File identifier bytes immediately after the fixed header.
     pub fn file_identifier(&self) -> &[u8] {
         let start = 33;

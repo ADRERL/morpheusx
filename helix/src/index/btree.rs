@@ -94,39 +94,6 @@ impl NamespaceIndex {
         }
     }
 
-    pub fn lookup_flex_mut(&mut self, path: &str) -> Option<&mut IndexEntry> {
-        if self.lookup(path).is_some() {
-            return self.lookup_mut(path);
-        }
-        if !path.ends_with('/') {
-            let mut with_slash = String::from(path);
-            with_slash.push('/');
-            if self.lookup(&with_slash).is_some() {
-                return self.lookup_mut(&with_slash);
-            }
-        } else if path.len() > 1 {
-            let without = &path[..path.len() - 1];
-            if self.lookup(without).is_some() {
-                return self.lookup_mut(without);
-            }
-        }
-        None
-    }
-
-    /// Look up by key (hash) alone. On collision returns the first live match.
-    pub fn lookup_by_key(&self, key: u64) -> Option<&IndexEntry> {
-        let start = self.entries.partition_point(|e| e.key < key);
-        for entry in &self.entries[start..] {
-            if entry.key != key {
-                break;
-            }
-            if entry.flags & entry_flags::IS_DELETED == 0 {
-                return Some(entry);
-            }
-        }
-        None
-    }
-
     /// Upsert; auto-compact tombstones once they exceed live entries (and index >= 512).
     pub fn upsert(&mut self, entry: IndexEntry) {
         let path_b = path_bytes(&entry.path);
@@ -211,10 +178,6 @@ impl NamespaceIndex {
         &self.entries
     }
 
-    pub fn all_entries_mut(&mut self) -> &mut [IndexEntry] {
-        &mut self.entries
-    }
-
     /// Drop tombstones from the in-memory index.
     pub fn compact(&mut self) {
         self.entries
@@ -235,6 +198,8 @@ impl NamespaceIndex {
         extent_root: BlockAddr,
         content_crc64: u64,
     ) -> IndexEntry {
+        // SAFETY: IndexEntry is #[repr(C)] and all-zeros is a valid bit pattern
+        // for every field (u8/u32/u64/[u8;N]); every field is set below or left 0.
         let mut entry: IndexEntry = unsafe { core::mem::zeroed() };
         entry.key = fnv1a_64(path.as_bytes());
         set_path(&mut entry.path, path.as_bytes());
@@ -262,6 +227,7 @@ impl NamespaceIndex {
     }
 
     pub fn make_dir_entry(path: &str, lsn: Lsn, timestamp_ns: u64) -> IndexEntry {
+        // SAFETY: IndexEntry is #[repr(C)]; all-zeros is valid for every field.
         let mut entry: IndexEntry = unsafe { core::mem::zeroed() };
         entry.key = fnv1a_64(path.as_bytes());
         set_path(&mut entry.path, path.as_bytes());

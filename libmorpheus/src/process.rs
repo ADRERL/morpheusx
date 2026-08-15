@@ -126,13 +126,12 @@ fn make_spawn_args(path: &str, descs: &[[u64; 2]]) -> morpheus_foundation::types
     }
 }
 
-/// Spawn ELF at `path`; returns child PID.
-pub fn spawn(path: &str) -> Result<u32, u64> {
-    let sa = make_spawn_args(path, &[]);
+/// Issues SYS_SPAWN for a prepared `SpawnArgs` and maps the result.
+fn do_spawn(sa: &morpheus_foundation::types::SpawnArgs) -> Result<u32, u64> {
     let ret = unsafe {
         syscall1(
             SYS_SPAWN,
-            &sa as *const morpheus_foundation::types::SpawnArgs as u64,
+            sa as *const morpheus_foundation::types::SpawnArgs as u64,
         )
     };
     if is_error(ret) {
@@ -140,6 +139,12 @@ pub fn spawn(path: &str) -> Result<u32, u64> {
     } else {
         Ok(ret as u32)
     }
+}
+
+/// Spawn ELF at `path`; returns child PID.
+pub fn spawn(path: &str) -> Result<u32, u64> {
+    let sa = make_spawn_args(path, &[]);
+    do_spawn(&sa)
 }
 
 /// Max 16 args. Child inherits our FDs.
@@ -152,17 +157,7 @@ pub fn spawn_with_args(path: &str, args: &[&str]) -> Result<u32, u64> {
         descs[i][1] = args[i].len() as u64;
     }
     let sa = make_spawn_args(path, &descs[..count]);
-    let ret = unsafe {
-        syscall1(
-            SYS_SPAWN,
-            &sa as *const morpheus_foundation::types::SpawnArgs as u64,
-        )
-    };
-    if is_error(ret) {
-        Err(ret)
-    } else {
-        Ok(ret as u32)
-    }
+    do_spawn(&sa)
 }
 
 // `PsEntry` (+ `zeroed`/`name_str`) is canonical in morpheus-foundation.

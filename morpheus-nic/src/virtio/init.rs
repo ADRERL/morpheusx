@@ -107,6 +107,9 @@ pub unsafe fn virtio_net_init(
 }
 
 /// Setup a single virtqueue.
+///
+/// # Safety
+/// Same contract as `virtio_net_init`: mmio_base valid, config's DMA region allocated.
 #[cfg(target_arch = "x86_64")]
 unsafe fn setup_queue(
     mmio_base: u64,
@@ -262,6 +265,9 @@ pub unsafe fn virtio_net_init_transport(
 }
 
 /// Setup a single virtqueue using transport abstraction.
+///
+/// # Safety
+/// Same contract as `virtio_net_init_transport`: transport valid and exclusively owned, config's DMA region allocated.
 #[cfg(target_arch = "x86_64")]
 unsafe fn setup_queue_transport(
     transport: &VirtioTransport,
@@ -345,6 +351,8 @@ unsafe fn setup_queue_transport(
 }
 
 // Stub for non-x86_64 platforms
+//
+// SAFETY: no unsafe operation performed; unconditionally returns an error to match the real function's signature.
 #[cfg(not(target_arch = "x86_64"))]
 pub unsafe fn virtio_net_init_transport(
     _transport: &VirtioTransport,

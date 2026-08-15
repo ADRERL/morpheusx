@@ -199,6 +199,9 @@ impl UsbMsdDriver {
     /// device, enable a slot, address it, configure bulk endpoints. Hub
     /// enumeration is intentionally NOT attempted here — the HID Phase-9 path
     /// has that, but for storage we only support root-port devices.
+    ///
+    /// # Safety
+    /// Same contract as `new`: self.controller's MMIO/DMA state is exclusively owned by this driver.
     unsafe fn enumerate_and_configure(&mut self) -> Result<(), UsbMsdInitError> {
         let port_count = self.controller.max_ports;
 
@@ -279,6 +282,9 @@ impl UsbMsdDriver {
 
     /// Issue TEST_UNIT_READY → READ_CAPACITY(10) to confirm the device is
     /// online and learn its sector count.
+    ///
+    /// # Safety
+    /// Same contract as `new`: self.controller's MMIO/DMA state is exclusively owned by this driver.
     unsafe fn scsi_init(&mut self) -> Result<(), UsbMsdInitError> {
         // TEST_UNIT_READY (6-byte CDB, zero-filled tail).
         let tur = [SCSI_TEST_UNIT_READY, 0, 0, 0, 0, 0];
@@ -306,6 +312,9 @@ impl UsbMsdDriver {
     }
 
     /// SCSI READ(10) via BOT — reads `count` sectors at `lba` into OFF_DATA.
+    ///
+    /// # Safety
+    /// Same contract as `new`: self.controller's MMIO/DMA state is exclusively owned by this driver.
     unsafe fn scsi_read_sectors(&mut self, lba: u64, count: u32) -> Result<(), UsbMsdInitError> {
         let byte_count = count * self.info.sector_size;
         let mut cmd = [0u8; 10];
@@ -325,6 +334,9 @@ impl UsbMsdDriver {
     /// CBW (31 bytes) → optional data stage → CSW (13 bytes). Tags must
     /// match between CBW and CSW; tag mismatch is treated as a stalled
     /// transport (`IoError`).
+    ///
+    /// # Safety
+    /// Same contract as `new`: self.controller's MMIO/DMA state is exclusively owned by this driver; CBW/CSW offsets are fixed within its owned DMA region.
     unsafe fn bot_command(
         &mut self,
         scsi_cb: &[u8],
@@ -347,12 +359,10 @@ impl UsbMsdDriver {
             core::ptr::write_volatile((cbw + 15 + i as u64) as *mut u8, b);
         }
 
-        // ── send CBW on bulk-out ──
         c.bout.enqueue(cbw, 31, TRB_NORMAL | TRB_IOC);
         c.ring_xfer_doorbell(c.dci_bulk_out as u32);
         c.wait_xfer(c.slot_id, c.dci_bulk_out as u32, 5000)?;
 
-        // ── data phase ──
         let mut transferred = 0u32;
         if data_len > 0 {
             let buf = c.dma_base + dma::OFF_DATA as u64;
@@ -369,7 +379,6 @@ impl UsbMsdDriver {
             }
         }
 
-        // ── receive CSW on bulk-in ──
         let csw = c.dma_base + dma::OFF_CSW as u64;
         core::ptr::write_bytes(csw as *mut u8, 0, 13);
         c.bin.enqueue(csw, 13, TRB_NORMAL | TRB_IOC);
@@ -399,6 +408,7 @@ impl BlockDriverInit for UsbMsdDriver {
         &[]
     }
 
+    // SAFETY: delegates to Self::new, whose contract (mmio_base is the valid, mapped xHCI base, config.tsc_freq calibrated) is the caller's obligation per BlockDriverInit::create's doc.
     unsafe fn create(mmio_base: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(mmio_base, config)
     }
@@ -437,6 +447,7 @@ impl BlockDriver for UsbMsdDriver {
         }
 
         let byte_count = num_sectors as u64 * self.info.sector_size as u64;
+        // SAFETY: self.controller's MMIO/DMA state is exclusively owned by this driver; byte_count was bounds-checked against total_sectors/max_sectors_per_request above, so it fits both the OFF_DATA bounce buffer and buffer_phys.
         unsafe {
             self.scsi_read_sectors(sector, num_sectors)
                 .map_err(|_| BlockError::IoError)?;
@@ -480,6 +491,7 @@ impl Drop for UsbMsdDriver {
         // left in a clean state. In practice this driver lives for the
         // duration of the kernel run (held in `bootloader::BLOCK_DEVICE`),
         // but the explicit quiesce keeps the API contract honest.
+        // SAFETY: self.controller is being dropped, so no other reference to its MMIO/DMA state can exist concurrently.
         unsafe {
             self.controller.quiesce();
         }

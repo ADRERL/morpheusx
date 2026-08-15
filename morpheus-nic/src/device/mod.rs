@@ -31,7 +31,6 @@ use crate::traits::NetworkDriver;
 use morpheus_foundation::error::{NetworkError, Result};
 
 pub mod pci;
-pub mod registers;
 
 /// Local copy of the `impl From<Src> for Dst` macro mirrored from
 /// `morpheus-network::impl_from`. Cannot reach the network crate's macro from

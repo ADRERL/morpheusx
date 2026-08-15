@@ -16,12 +16,10 @@ pub unsafe fn sys_compositor_set() -> u64 {
     let pid = SCHEDULER.current_pid();
     let cur = COMPOSITOR_PID.load(Relaxed);
     if cur != 0 && cur != pid {
-        let _ = cur;
         crate::serial::log_warn("COMP", 780, "compositor already registered (EBUSY)");
         return EBUSY;
     }
     COMPOSITOR_PID.store(pid, Relaxed);
-    let _ = pid;
     crate::serial::log_ok("COMP", 781, "compositor registered");
     0
 }

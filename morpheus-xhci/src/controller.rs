@@ -297,6 +297,10 @@ impl XhciController {
     }
 
     /// Write PORTSC preserving RO+RWS bits.
+    ///
+    /// # Safety
+    /// `addr` must be a verified-UC PORTSC MMIO register; the caller must
+    /// hold exclusive access (single-threaded bring-up, no concurrent writer).
     unsafe fn portsc_write(addr: u64, current: u32, set: u32, clear: u32) {
         const RO: u32 = (1 << 0) | (1 << 3) | (0xF << 10) | (1 << 30);
         const RWS: u32 = (0xF << 5) | (1 << 9) | (0x3 << 14) | (0x7 << 25);
@@ -371,6 +375,10 @@ impl XhciController {
         }
     }
 
+    /// # Safety
+    /// `tsc_freq` must be the calibrated TSC frequency; this is a busy-wait
+    /// spin loop with no memory access, so the only invariant is a sane
+    /// frequency value (avoids a runaway or instant-return delay).
     #[inline(always)]
     pub(crate) unsafe fn tsc_delay(tsc_freq: u64, ms: u64) {
         if ms == 0 {

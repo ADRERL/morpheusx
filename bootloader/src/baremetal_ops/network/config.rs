@@ -3,7 +3,8 @@ use morpheus_net_stack::stack::NetState;
 use super::state;
 
 pub(super) unsafe fn net_cfg_get(buf: *mut u8) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -39,13 +40,14 @@ pub(super) unsafe fn net_cfg_get(buf: *mut u8) -> i64 {
     let mac = stack.mac_address();
     out.mac[..6].copy_from_slice(&mac);
     out.mtu = 1500;
-    state::write_hostname_to(out);
+    ns.write_hostname_to(out);
 
     0
 }
 
 pub(super) unsafe fn net_cfg_dhcp() -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut ns = state::net();
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
@@ -60,18 +62,20 @@ pub(super) unsafe fn net_cfg_static_ip(_ip: u32, _prefix_len: u8, _gateway: u32)
 }
 
 pub(super) unsafe fn net_cfg_hostname(name: *const u8, len: usize) -> i64 {
-    state::set_hostname(name, len)
+    state::net().set_hostname(name, len)
 }
 
 pub(super) unsafe fn net_poll_drive(timestamp_ms: u64) -> i64 {
-    let Some(stack) = state::user_net_stack_mut() else {
+    let mut guard = state::net();
+    let ns = &mut *guard;
+    let Some(stack) = ns.stack.as_mut() else {
         return -1;
     };
 
     stack.device_mut().refill_rx_queue();
     let activity = stack.poll(timestamp_ms);
     stack.device_mut().collect_tx_completions();
-    state::reap_expired_dns_queries(stack, timestamp_ms);
+    state::reap_expired_dns_queries(stack, &mut ns.dns, &mut ns.dns_starts, timestamp_ms);
     if activity {
         1
     } else {
@@ -81,7 +85,8 @@ pub(super) unsafe fn net_poll_drive(timestamp_ms: u64) -> i64 {
 
 /// Milliseconds until smoltcp needs us next, or -1 if no stack / no deadline.
 pub(super) unsafe fn net_poll_at(timestamp_ms: u64) -> i64 {
-    match state::user_net_stack_mut() {
+    let mut ns = state::net();
+    match ns.stack.as_mut() {
         Some(stack) => match stack.poll_delay_ms(timestamp_ms) {
             Some(ms) => ms.min(i64::MAX as u64) as i64,
             None => -1,
@@ -91,7 +96,8 @@ pub(super) unsafe fn net_poll_at(timestamp_ms: u64) -> i64 {
 }
 
 pub(super) unsafe fn net_poll_stats(buf: *mut u8) -> i64 {
-    if state::user_net_stack_mut().is_none() {
+    let ns = state::net();
+    if ns.stack.is_none() {
         return -1;
     }
     let out = &mut *(buf as *mut morpheus_kernel::syscall::handler::NetStats);
@@ -102,6 +108,6 @@ pub(super) unsafe fn net_poll_stats(buf: *mut u8) -> i64 {
     );
     out.tx_packets = morpheus_net_stack::stack::tx_packet_count() as u64;
     out.rx_packets = morpheus_net_stack::stack::rx_packet_count() as u64;
-    out.tcp_active = state::tcp_active_count();
+    out.tcp_active = ns.tcp_active_count();
     0
 }

@@ -2,8 +2,6 @@
 //! and QEMU ich9-ahci. Polling-only; per-port CLB/FIS/CT DMA layout per spec §4.2.
 
 pub mod init;
-pub mod port;
-pub mod regs;
 
 use crate::block_traits::{
     BlockCompletion, BlockDeviceInfo, BlockDriver, BlockDriverInit, BlockError,
@@ -101,9 +99,6 @@ extern "win64" {
 
 pub const INTEL_VENDOR_ID: u16 = 0x8086;
 
-/// Wildcat Point-LP — ThinkPad T450s reference target.
-pub const AHCI_DEVICE_WPT_LP: u16 = 0x9C83;
-
 pub const AHCI_DEVICE_IDS: &[u16] = &[
     0x2922, // ICH9 (QEMU ich9-ahci)
     0x9C83, // Wildcat Point-LP
@@ -136,6 +131,9 @@ pub const ATA_STS_ERR: u8 = 1 << 0;
 /// AHCI §10.6 BIOS/OS handoff. On Intel PCH, skipping this and writing GHC.HR
 /// stalls the bus forever because the firmware state machine never advances.
 /// No-op when CAP2.BOH is clear (QEMU, non-Intel HBAs).
+///
+/// # Safety
+/// `abar` must be the device's owned, UC-mapped AHCI ABAR (BAR5); called before any other GHC access.
 unsafe fn ahci_bios_handoff(abar: u64, tsc_freq: u64) {
     const AHCI_CAP2: u64 = 0x24;
     const AHCI_BOHC: u64 = 0x28;
@@ -224,6 +222,7 @@ impl AhciDriver {
         Self::new_inner(abar, config, Some(port_num))
     }
 
+    // SAFETY: same contract as new()/new_on_port() (the only callers): abar is the device's mapped BAR5, config DMA pointers are valid.
     unsafe fn new_inner(
         abar: u64,
         config: AhciConfig,
@@ -425,11 +424,13 @@ impl AhciDriver {
 
     fn cmd_header_ptr(&self, slot: u32) -> *mut u8 {
         // 32-byte command header per slot.
+        // SAFETY: slot < num_slots (allocator-maintained invariant); cmd_list_cpu spans num_slots * 32 bytes of the driver's owned DMA region.
         unsafe { self.cmd_list_cpu.add((slot as usize) * 32) }
     }
 
     fn cmd_table_ptr(&self, slot: u32) -> *mut u8 {
         // 256-byte command table (CFIS + ACMD + PRDT) per slot.
+        // SAFETY: slot < num_slots (allocator-maintained invariant); cmd_tables_cpu spans num_slots * 256 bytes of the driver's owned DMA region.
         unsafe { self.cmd_tables_cpu.add((slot as usize) * 256) }
     }
 
@@ -450,6 +451,7 @@ impl AhciDriver {
     }
 
     pub fn link_up(&self) -> bool {
+        // SAFETY: self.abar is the owned, UC-mapped AHCI ABAR; port_num is the driver's own initialized port.
         let det = unsafe { asm_ahci_port_detect(self.abar, self.port_num) };
         det == DET_PHY_COMM
     }
@@ -459,6 +461,7 @@ impl AhciDriver {
     }
 
     pub fn version(&self) -> (u8, u8) {
+        // SAFETY: self.abar is the owned, UC-mapped AHCI ABAR; VS is a fixed, always-readable register.
         let vs = unsafe { asm_ahci_read_version(self.abar) };
         let major = ((vs >> 16) & 0xFF) as u8;
         let minor = ((vs >> 8) & 0xFF) as u8;
@@ -491,6 +494,7 @@ impl BlockDriver for AhciDriver {
 
         let slot = self.alloc_slot().ok_or(BlockError::QueueFull)?;
 
+        // SAFETY: self.abar/port_num are owned; slot came from alloc_slot() (< num_slots); cmd_header/table pointers index the driver's owned DMA region; buffer_phys/num_sectors are caller-validated against total_sectors above.
         let result = unsafe {
             asm_ahci_submit_read(
                 self.abar,
@@ -538,6 +542,7 @@ impl BlockDriver for AhciDriver {
 
         let slot = self.alloc_slot().ok_or(BlockError::QueueFull)?;
 
+        // SAFETY: self.abar/port_num are owned; slot came from alloc_slot() (< num_slots); cmd_header/table pointers index the driver's owned DMA region; buffer_phys/num_sectors are caller-validated against total_sectors above.
         let result = unsafe {
             asm_ahci_submit_write(
                 self.abar,
@@ -572,6 +577,7 @@ impl BlockDriver for AhciDriver {
             }
 
             let slot_mask = 1u32 << slot;
+            // SAFETY: self.abar/port_num are owned; slot_mask bit corresponds to a slot marked active in in_flight.
             let status =
                 unsafe { asm_ahci_check_cmd_complete(self.abar, self.port_num, slot_mask) };
 
@@ -581,11 +587,13 @@ impl BlockDriver for AhciDriver {
 
             let request_id = self.in_flight[slot].request_id;
 
+            // SAFETY: slot < num_slots (in_flight is indexed by slot, marked active); cmd_header_ptr indexes the driver's owned DMA region.
             let bytes_transferred =
                 unsafe { asm_ahci_read_prdbc(self.cmd_header_ptr(slot as u32) as u64) };
 
             self.in_flight[slot].active = false;
 
+            // SAFETY: self.abar/port_num are owned, UC-mapped AHCI ABAR/port.
             unsafe {
                 asm_ahci_port_clear_is(self.abar, self.port_num, 0xFFFFFFFF);
             }
@@ -610,6 +618,7 @@ impl BlockDriver for AhciDriver {
     fn flush(&mut self) -> Result<(), BlockError> {
         let slot = self.alloc_slot().ok_or(BlockError::QueueFull)?;
 
+        // SAFETY: self.abar/port_num are owned; slot came from alloc_slot() (< num_slots); cmd_header/table pointers index the driver's owned DMA region; poll spins on self.tsc_freq for a bounded timeout.
         unsafe {
             let result = asm_ahci_flush_cache(
                 self.abar,
@@ -650,6 +659,7 @@ impl BlockDriverInit for AhciDriver {
         AHCI_DEVICE_IDS
     }
 
+    // SAFETY: delegates to Self::new, whose contract (abar is the mapped BAR5, config DMA pointers valid) is the caller's obligation per BlockDriverInit::create's doc.
     unsafe fn create(abar: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(abar, config)
     }

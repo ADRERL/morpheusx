@@ -297,11 +297,6 @@ pub unsafe fn sys_fs_stat(path_ptr: u64, path_len: u64, stat_buf: u64) -> u64 {
 /// truncated (and the `> max_entries` return signals the caller to retry larger) rather
 /// than overrun. A null `buf_ptr` (or `max_entries == 0`) is a probe: nothing is written
 /// and only the count is returned.
-///
-/// Without `max_entries` the kernel wrote its current child count regardless of the
-/// caller's buffer size — a heap overflow whenever a directory held more children than
-/// the caller allocated for. The capacity bound closes that at the syscall boundary;
-/// userland keeps a grow-and-retry loop for directories larger than its initial guess.
 pub unsafe fn sys_fs_readdir(path_ptr: u64, path_len: u64, buf_ptr: u64, max_entries: u64) -> u64 {
     let path = match resolve_user_path(path_ptr, path_len) {
         Some(p) => p,

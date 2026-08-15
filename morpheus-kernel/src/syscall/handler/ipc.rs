@@ -3,7 +3,6 @@
 // munmap frees. Caps capability: must know PID and own a matching VMA.
 
 use super::common::*;
-use super::core::sys_yield;
 use super::fs::sys_fs_close;
 use super::mem::USER_MMAP_BASE;
 use crate::hal;
@@ -17,8 +16,6 @@ use morpheus_helix::types::open_flags::{O_CLOEXEC, O_NONBLOCK, O_PIPE_READ, O_PI
 use super::mem::prot_to_user_preset;
 
 pub unsafe fn sys_shm_grant(target_pid: u64, src_vaddr: u64, pages: u64, flags: u64) -> u64 {
-    let _ = sys_yield; // silence unused warning if reflow is needed.
-
     if pages == 0 || pages > 1024 {
         return EINVAL;
     }

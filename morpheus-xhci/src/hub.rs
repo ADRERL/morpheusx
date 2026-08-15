@@ -142,6 +142,9 @@ impl XhciController {
         self.hub_port_clear_feature(port, PORT_FEAT_C_CONNECTION)
     }
 
+    /// # Safety
+    /// The controller must be initialized with valid MMIO and DMA mappings and
+    /// the caller must hold exclusive access; `self.slot_id` must be an addressed hub.
     unsafe fn hub_port_set_feature(&mut self, port: u8, feature: u16) -> Result<(), XhciError> {
         let slot_id = self.slot_id;
         // 0x23 = H2D, Class, Other; 0x03 = SET_FEATURE.
@@ -153,6 +156,9 @@ impl XhciController {
         Ok(())
     }
 
+    /// # Safety
+    /// The controller must be initialized with valid MMIO and DMA mappings and
+    /// the caller must hold exclusive access; `self.slot_id` must be an addressed hub.
     unsafe fn hub_port_clear_feature(&mut self, port: u8, feature: u16) -> Result<(), XhciError> {
         let slot_id = self.slot_id;
         // 0x23 = H2D, Class, Other; 0x01 = CLEAR_FEATURE.

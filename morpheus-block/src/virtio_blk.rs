@@ -489,6 +489,7 @@ impl VirtioBlkDriver {
 
     /// Read status byte for a slot.
     fn read_status(&self, slot_idx: usize) -> u8 {
+        // SAFETY: slot_idx < MAX_IN_FLIGHT (in_flight is indexed by it); status_cpu spans MAX_IN_FLIGHT bytes of the driver's owned DMA region.
         unsafe { ptr::read_volatile(self.status_cpu.add(slot_idx)) }
     }
 }
@@ -524,16 +525,19 @@ impl BlockDriver for VirtioBlkDriver {
             reserved: 0,
             sector,
         };
+        // SAFETY: slot_idx came from alloc_desc_set() (< MAX_IN_FLIGHT); headers_cpu spans MAX_IN_FLIGHT headers of the driver's owned DMA region.
         unsafe {
             ptr::write_volatile(self.headers_cpu.add(slot_idx as usize), header);
         }
 
         // Initialize status
+        // SAFETY: slot_idx < MAX_IN_FLIGHT; status_cpu spans MAX_IN_FLIGHT bytes of the driver's owned DMA region.
         unsafe {
             ptr::write_volatile(self.status_cpu.add(slot_idx as usize), 0xFF);
         }
 
         // Submit via ASM
+        // SAFETY: self.queue is the driver's live VirtqueueState; desc_idx/slot_idx came from alloc_desc_set(); buffer_phys/num_sectors are caller-validated against total_sectors above; header/status phys addrs match the just-written DMA slots.
         let result = unsafe {
             asm_virtio_blk_submit_read(
                 &mut self.queue,
@@ -586,16 +590,19 @@ impl BlockDriver for VirtioBlkDriver {
             reserved: 0,
             sector,
         };
+        // SAFETY: slot_idx came from alloc_desc_set() (< MAX_IN_FLIGHT); headers_cpu spans MAX_IN_FLIGHT headers of the driver's owned DMA region.
         unsafe {
             ptr::write_volatile(self.headers_cpu.add(slot_idx as usize), header);
         }
 
         // Initialize status
+        // SAFETY: slot_idx < MAX_IN_FLIGHT; status_cpu spans MAX_IN_FLIGHT bytes of the driver's owned DMA region.
         unsafe {
             ptr::write_volatile(self.status_cpu.add(slot_idx as usize), 0xFF);
         }
 
         // Submit via ASM
+        // SAFETY: self.queue is the driver's live VirtqueueState; desc_idx/slot_idx came from alloc_desc_set(); buffer_phys/num_sectors are caller-validated against total_sectors above; header/status phys addrs match the just-written DMA slots.
         let result = unsafe {
             asm_virtio_blk_submit_write(
                 &mut self.queue,
@@ -625,6 +632,7 @@ impl BlockDriver for VirtioBlkDriver {
     fn poll_completion(&mut self) -> Option<BlockCompletion> {
         let mut result = BlkPollResult::default();
 
+        // SAFETY: self.queue is the driver's live VirtqueueState; result is a valid, live local BlkPollResult.
         let has_completion = unsafe { asm_virtio_blk_poll_complete(&mut self.queue, &mut result) };
 
         if has_completion == 0 {
@@ -637,19 +645,14 @@ impl BlockDriver for VirtioBlkDriver {
             return None;
         }
 
-        // Check if slot is active before doing anything
         if !self.in_flight[slot_idx].active {
             return None;
         }
 
-        // Read status BEFORE taking mutable borrow of in_flight slot
         let status = self.read_status(slot_idx);
 
-        // Now we can safely mutably borrow to extract info and clear
         let in_flight = &mut self.in_flight[slot_idx];
         let request_id = in_flight.request_id;
-
-        // Mark slot as free
         in_flight.active = false;
 
         let completion = BlockCompletion {
@@ -691,10 +694,13 @@ impl BlockDriverInit for VirtioBlkDriver {
         &[0x1001, 0x1042] // virtio-blk legacy and modern
     }
 
+    // SAFETY: delegates to Self::new, whose contract (mmio_base is valid VirtIO-blk MMIO, config has valid physical addresses) is the caller's obligation per BlockDriverInit::create's doc.
     unsafe fn create(mmio_base: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(mmio_base, config)
     }
 }
 
-// Safety: VirtioBlkDriver only contains raw pointers that are not shared
+// SAFETY: VirtioBlkDriver holds only raw pointers/addresses into its own owned MMIO and DMA
+// regions; construction hands off exclusive ownership to the kernel's single driver instance,
+// and this bring-up is single-threaded so no other owner can access the device concurrently.
 unsafe impl Send for VirtioBlkDriver {}

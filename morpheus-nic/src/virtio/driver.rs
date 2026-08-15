@@ -176,6 +176,7 @@ impl DriverInit for VirtioNetDriver {
         VIRTIO_NET_DEVICE_IDS
     }
 
+    // SAFETY: delegates to Self::new, whose contract (mmio_base is valid VirtIO MMIO, DMA region allocated) is the caller's obligation per DriverInit::create's doc.
     unsafe fn create(mmio_base: u64, config: Self::Config) -> Result<Self, Self::Error> {
         Self::new(mmio_base, config)
     }

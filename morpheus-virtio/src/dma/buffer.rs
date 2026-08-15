@@ -30,6 +30,7 @@ impl DmaBuffer {
             "BUG: Cannot access buffer not owned by driver (state: {:?})",
             self.ownership
         );
+        // SAFETY: cpu_ptr/capacity came from DmaBuffer::new's caller-guaranteed DMA region; DriverOwned state (checked above) means the device is not concurrently writing it.
         unsafe { core::slice::from_raw_parts(self.cpu_ptr, self.capacity) }
     }
 
@@ -39,6 +40,7 @@ impl DmaBuffer {
             "BUG: Cannot access buffer not owned by driver (state: {:?})",
             self.ownership
         );
+        // SAFETY: cpu_ptr/capacity came from DmaBuffer::new's caller-guaranteed DMA region; DriverOwned state (checked above) means the device holds no reference to it.
         unsafe { core::slice::from_raw_parts_mut(self.cpu_ptr, self.capacity) }
     }
 
@@ -83,6 +85,10 @@ impl DmaBuffer {
     }
 
     /// Free -> DriverOwned. Pool alloc only.
+    ///
+    /// # Safety
+    /// Caller (BufferPool::alloc) must only call this on a buffer it just
+    /// removed from the free list, so no other owner can access it concurrently.
     pub(crate) unsafe fn mark_allocated(&mut self) {
         assert!(self.ownership.is_free(), "Buffer must be free to allocate");
         self.ownership = BufferOwnership::DriverOwned;
@@ -125,6 +131,10 @@ impl DmaBuffer {
     }
 
     /// DriverOwned -> Free. Pool return only.
+    ///
+    /// # Safety
+    /// Caller (BufferPool::free) must only call this after verifying the
+    /// buffer was driver-owned, preventing double-free of the free-list slot.
     pub(crate) unsafe fn mark_free(&mut self) {
         assert!(
             self.ownership == BufferOwnership::DriverOwned,
@@ -134,5 +144,8 @@ impl DmaBuffer {
     }
 }
 
+// SAFETY: DmaBuffer wraps a raw pointer into driver-owned DMA memory; ownership transfers are
+// serialized through BufferOwnership (Free/DriverOwned/DeviceOwned), and this bring-up is single-threaded.
 unsafe impl Send for DmaBuffer {}
+// SAFETY: shared access is limited to reads through as_slice(), which is gated on DriverOwned state.
 unsafe impl Sync for DmaBuffer {}

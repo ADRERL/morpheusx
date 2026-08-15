@@ -96,6 +96,8 @@ pub fn format_helix<B: BlockIo>(
     let seg_block_lba = partition_lba_start + log_start * sector_scale as u64;
     let scale = (BLOCK_SIZE / device_block_size) as u64;
     let mut seg_buf = vec![0u8; BLOCK_SIZE as usize];
+    // SAFETY: LogSegmentHeader is #[repr(C)]; size_of gives its exact byte extent,
+    // well within seg_buf's BLOCK_SIZE allocation.
     let hdr_bytes = unsafe {
         core::slice::from_raw_parts(
             &seg_header as *const _ as *const u8,
@@ -151,6 +153,8 @@ pub fn is_helix<B: BlockIo>(
     }
 
     // buf is a Vec<u8> (alignment 1); copy out rather than form a misaligned ref.
+    // SAFETY: buf holds a freshly read BLOCK_SIZE block and HelixSuperblock is
+    // #[repr(C)] POD of exactly that size; read_unaligned tolerates buf's alignment.
     let sb: HelixSuperblock =
         unsafe { core::ptr::read_unaligned(buf.as_ptr() as *const HelixSuperblock) };
     sb.is_valid()

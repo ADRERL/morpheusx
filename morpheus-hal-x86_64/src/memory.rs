@@ -521,6 +521,7 @@ impl MemoryRegistry {
                 continue;
             }
 
+            let is_code = matches!(d.mem_type, MemoryType::BootServicesCode);
             let phys = d.physical_start;
             let pages = d.number_of_pages;
             if pages == 0 {
@@ -554,12 +555,18 @@ impl MemoryRegistry {
             }
 
             for &(s_start, s_end) in subs.iter().take(nsub) {
+                puts("[MEM] reclaim ");
+                put_hex64(s_start);
+                puts("..");
+                put_hex64(s_end);
+                puts(if is_code { " bs-code\n" } else { " bs-data\n" });
                 reclaimed_pages += self.add_range_punching_holes(s_start, s_end, cpu_excl);
             }
         }
 
-        let reclaimed_mb = (reclaimed_pages * PAGE_SIZE) >> 20;
-        let _ = reclaimed_mb;
+        puts("[MEM] reclaimed pages=");
+        put_hex64(reclaimed_pages);
+        puts("\n");
     }
 
     /// Add `[start, end)`, skipping `holes`. `holes` must be sorted ascending.
@@ -1276,10 +1283,6 @@ pub fn is_registry_initialized() -> bool {
     REGISTRY_INITIALIZED.load(core::sync::atomic::Ordering::Acquire)
 }
 
-// Legacy aliases.
-pub type PhysicalMemoryMap = MemoryRegistry;
-pub type MemoryRegion = MemoryDescriptor;
-
 /// Bump allocator for pre-registry boot.
 pub struct PhysicalAllocator {
     current: u64,
@@ -1317,20 +1320,6 @@ impl PhysicalAllocator {
     pub fn remaining(&self) -> u64 {
         self.end.saturating_sub(self.current)
     }
-}
-
-/// Standalone (non-global) registry.
-///
-/// # Safety
-/// Same as `import_uefi_map`.
-pub unsafe fn parse_uefi_memory_map(
-    map_ptr: *const u8,
-    map_size: usize,
-    desc_size: usize,
-) -> MemoryRegistry {
-    let mut r = MemoryRegistry::new();
-    r.import_uefi_map(map_ptr, map_size, desc_size, 1, 0, 0, 0, 0, &[]);
-    r
 }
 
 pub fn fallback_allocator() -> PhysicalAllocator {

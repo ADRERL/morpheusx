@@ -78,7 +78,7 @@ pub fn set_checkpoints_enabled(enabled: bool) {
     console::set_checkpoints_enabled(enabled);
 }
 
-/// Boot-log ring (now the real console ring, not a stub).
+/// Boot-log ring, backed by the console ring buffer.
 #[inline]
 pub fn boot_log() -> &'static str {
     console::boot_log()
