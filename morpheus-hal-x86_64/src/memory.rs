@@ -331,6 +331,9 @@ impl MemoryRegistry {
             windows.swap(0, 1);
         }
 
+        if descriptor_size == 0 {
+            return;
+        }
         let entry_count = map_size / descriptor_size;
 
         for i in 0..entry_count {

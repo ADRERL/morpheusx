@@ -27,7 +27,8 @@ impl OptionalHeader64 {
         // Optional header = pe_offset + 4 (sig) + 20 (COFF).
         let opt_offset = pe_offset as usize + 24;
 
-        if opt_offset + 96 > size {
+        // 112 not 96: number_of_rva_and_sizes is read at opt_offset+108 (u32 -> +112).
+        if opt_offset + 112 > size {
             return Err(PeError::InvalidOffset);
         }
 
@@ -83,5 +84,35 @@ impl OptionalHeader64 {
         data[image_base_offset..image_base_offset + 8].copy_from_slice(&bytes);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bounds_regression {
+    use super::OptionalHeader64 as O;
+    use crate::pe::PeError;
+
+    // Regression: parse read number_of_rva_and_sizes at opt_offset+108 (u32 ->
+    // +112) but only guarded opt_offset+96 — a ~16B OOB read for a buffer sized
+    // in [96,112). The guard must be +112.
+    #[test]
+    fn rejects_optional_header_shorter_than_full_read() {
+        // one 136-byte backing buffer; the `size` arg drives the guard. pe_offset
+        // 0 -> opt_offset 24, so a claimed size under 24+112=136 must be rejected
+        // before the +108 read (never reached).
+        let buf = [0u8; 24 + 112];
+        for size in [24 + 96usize, 24 + 100, 24 + 111] {
+            let r = unsafe { O::parse(buf.as_ptr(), 0, size) };
+            assert!(
+                matches!(r, Err(PeError::InvalidOffset)),
+                "size {size} must be rejected"
+            );
+        }
+        // 136 bytes is enough to read every field; magic 0x020B -> parses.
+        let mut full = [0u8; 24 + 112];
+        full[24] = 0x0B;
+        full[25] = 0x02; // MAGIC_PE32PLUS little-endian
+        let r = unsafe { O::parse(full.as_ptr(), 0, full.len()) };
+        assert!(r.is_ok(), "full-size buffer with PE32+ magic must parse");
     }
 }

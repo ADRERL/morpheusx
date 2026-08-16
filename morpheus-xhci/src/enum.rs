@@ -199,8 +199,8 @@ impl XhciController {
     ///     for LED reports, but it's not required for keystrokes)
     ///   * preserves the current slot context's route string, Hub bit,
     ///     MTT, parent-hub fields and speed (rather than wiping them)
-    ///   * sets Context Entries at bits [31:27] correctly — `configure_endpoints`
-    ///     has a long-standing off-by-one that puts it at bit 26 (Hub) instead
+    ///   * sets Context Entries at bits [31:27] correctly (same discipline
+    ///     `configure_endpoints` now follows)
     ///
     /// # Safety
     /// The controller must be initialized with valid MMIO and DMA mappings and
@@ -297,10 +297,18 @@ impl XhciController {
         let add_flags = (1u32 << 0) | (1u32 << dci_in) | (1u32 << dci_out);
         vw32(in_ctx + 4, add_flags);
 
+        // Mirror configure_hid_endpoint: copy the live slot context and patch only
+        // Context Entries [31:27], not bit 26 (Hub). The old (d0 & 0xF<<20) |
+        // (max_dci<<26) dropped the route string and set the Hub bit on odd max_dci,
+        // and left DW2/DW3 (TT hub/port) zero — broke USB-MSD behind an internal hub.
         let out_slot = self.dma_base + dma::slot_out_ctx_offset(self.slot_id) as u64;
+        let in_slot = in_ctx + cs;
         let d0 = vr32(out_slot);
-        vw32(in_ctx + cs, (d0 & (0xF << 20)) | ((max_dci as u32) << 26));
-        vw32(in_ctx + cs + 4, vr32(out_slot + 4));
+        let d0_new = (d0 & !(0x1Fu32 << 27)) | ((max_dci as u32 & 0x1F) << 27);
+        vw32(in_slot, d0_new);
+        vw32(in_slot + 4, vr32(out_slot + 4));
+        vw32(in_slot + 8, vr32(out_slot + 8));
+        vw32(in_slot + 12, vr32(out_slot + 12));
 
         let ep_in = in_ctx + ((dci_in as u64) + 1) * cs;
         vw32(

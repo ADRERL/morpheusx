@@ -31,7 +31,9 @@ pub fn surface_list(buf: &mut [SurfaceEntry]) -> usize {
 /// Map another process's surface into our address space until that process exits.
 pub fn surface_map(pid: u32) -> Result<*mut u8, u64> {
     let r = unsafe { syscall1(SYS_WIN_SURFACE_MAP, pid as u64) };
-    if r > 0xFFFF_FFFF_FFFF_FF00 {
+    // full errno window [-4095,-1], not just [-256,-1]: a mid-range errno must not
+    // be handed back as a valid surface pointer.
+    if crate::is_error(r) {
         Err(r)
     } else {
         Ok(r as *mut u8)

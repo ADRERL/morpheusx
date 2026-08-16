@@ -150,6 +150,16 @@ pub fn read_extent_file<B: BlockIo>(
         node_block,
     )?;
     let scale = BLOCK_SIZE as u64 / device_block_size as u64;
+    // bound the allocation by mapped extents: a file_size larger than its extents
+    // cover is a corrupt inode, not a real file (helix is not sparse) — reject it
+    // instead of allocating an attacker-chosen size from an untrusted node record.
+    let covered: u64 = extents
+        .iter()
+        .map(|(_, _, count)| *count as u64 * BLOCK_SIZE as u64)
+        .sum();
+    if file_size > covered {
+        return Err(HelixError::FileTooLarge);
+    }
     let mut result = vec![0u8; file_size as usize];
 
     for (logical, physical, count) in extents {

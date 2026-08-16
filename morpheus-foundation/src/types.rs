@@ -623,7 +623,9 @@ impl WaitStatus {
     }
     #[inline]
     pub const fn signaled(s: i32) -> bool {
-        ((s & 0x7f) + 1) >> 1 > 0
+        // glibc WIFSIGNALED: cast to i8 BEFORE the shift so 0x7f (stopped) -> -128
+        // -> -64 -> false; shifting in i32 wrongly yields 64 > 0 = true.
+        ((((s & 0x7f) + 1) as i8) >> 1) > 0
     }
     #[inline]
     pub const fn term_sig(s: i32) -> i32 {
@@ -864,3 +866,24 @@ const _: () = {
     assert!(size_of::<KSigInfo>() == 128 && align_of::<KSigInfo>() == 8);
     assert!(offset_of!(KSigInfo, fields) == 16);
 };
+
+#[cfg(test)]
+mod wait_status_regression {
+    use super::WaitStatus as W;
+
+    // Regression: signaled() must match glibc WIFSIGNALED — the i8-before-shift
+    // trick. Before the fix, signaled(0x7f) returned true (i32 shift) where a
+    // stopped status must classify as NOT signaled.
+    #[test]
+    fn signaled_matches_linux_classification() {
+        assert!(!W::signaled(0), "exited(0) is not signaled");
+        assert!(W::signaled(9), "SIGKILL(9) is signaled");
+        assert!(W::signaled(15), "SIGTERM(15) is signaled");
+        assert!(!W::signaled(0x7f), "stopped(0x7f) must NOT be signaled");
+        assert!(W::exited(0));
+        assert!(W::stopped(0x7f));
+        assert!(!W::exited(0x7f));
+        // the three termination classes are mutually exclusive for these words
+        assert!(!(W::exited(9) || W::stopped(9)) && W::signaled(9));
+    }
+}
