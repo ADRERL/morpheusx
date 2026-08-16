@@ -94,3 +94,32 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod crc32_differential {
+    //! differential for the private crc32 against the crc crate; the kats live
+    //! in mod tests above.
+    use super::crc32;
+    use crc::{Crc, CRC_32_ISO_HDLC};
+
+    const REF: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+
+    #[test]
+    fn crc32_matches_crc_crate() {
+        let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u8
+        };
+        let mut buf = [0u8; 512];
+        for len in 0..=512usize {
+            for b in buf.iter_mut().take(len) {
+                *b = next();
+            }
+            let s = &buf[..len];
+            assert_eq!(crc32(s), REF.checksum(s), "crc32 differs at len {len}");
+        }
+    }
+}

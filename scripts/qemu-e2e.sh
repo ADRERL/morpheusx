@@ -360,6 +360,12 @@ main() {
     echo ""
     if run_qemu "$ovmf_path" "$esp_img" "$timeout" "$token" "$use_kvm" "$verbose" "$serial_log"; then
         echo ""
+        if [[ -f "$serial_log" ]] && [[ -x "$SCRIPT_DIR/qemu-assert.sh" ]]; then
+            if ! "$SCRIPT_DIR/qemu-assert.sh" "$serial_log" --label e2e; then
+                log_error "=== E2E TEST FAILED (manifest assertion) ==="
+                exit 1
+            fi
+        fi
         log_ok "=== E2E TEST PASSED ==="
         exit 0
     else

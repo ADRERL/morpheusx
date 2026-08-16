@@ -21,6 +21,9 @@ gpt_disk_types.workspace = true
 # For std-based testing only
 gpt_disk_io = { version = "0.16" }
 gpt_disk_types = { version = "0.16" }
+crc = "3.3"
+crc32fast = "1.4"
+proptest = "1.6"
 
 [features]
 default = []

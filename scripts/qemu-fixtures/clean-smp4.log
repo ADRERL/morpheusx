@@ -1,0 +1,8 @@
+  [[36mMorpheusX[0m  v0
+  [[32m OK [0m]  firmware handoff (UEFI/GOP)
+  [[32m OK [0m]  smp (4 cpu online)
+[MEM] reclaim 0000000000100000..0000000000200000 bs-data
+[MEM] reclaimed pages=0x0000000000000123
+  [[32m OK [0m]  smp (4 cpu online)
+
+MORPHEUSX_BOOT_OK

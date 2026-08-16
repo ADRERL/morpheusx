@@ -2,9 +2,19 @@
 name = "morpheus-foundation"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 description = "Arch-agnostic shared types and syscall ABI constants. NO asm, NO serial — those live in per-arch HAL crates."
 
 [features]
 default = []
 
 [dependencies]
+
+# host-only: the C-probe oracle scaffold (build.rs) + differential test deps.
+# never enter the shipped no_std rlib (uefi build.rs early-returns).
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+libc = "0.2"
+proptest = "1.6"

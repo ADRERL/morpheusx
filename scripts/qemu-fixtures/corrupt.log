@@ -1,0 +1,5 @@
+  [[32m OK [0m]  smp (4 cpu online)
+[MEM] CORRUPT list_push: head=0xdeadbeef
+[MEM] reclaimed pages=0x0000000000000123
+
+MORPHEUSX_BOOT_OK

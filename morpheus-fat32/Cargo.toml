@@ -8,3 +8,8 @@ description = "FAT32 read-only filesystem engine for MorpheusX"
 morpheus-foundation.workspace = true
 gpt_disk_io.workspace = true
 gpt_disk_types.workspace = true
+
+[dev-dependencies]
+crc = "3.3"
+crc32fast = "1.4"
+proptest = "1.6"

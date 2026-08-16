@@ -403,3 +403,42 @@ fn crc32(data: &[u8]) -> u32 {
 
     !crc
 }
+
+#[cfg(test)]
+mod checksum_kat {
+    //! crc32 is private, so its kat + differential against the crc crate live
+    //! inline. no_std crate: stack buffers only, no alloc.
+    use super::crc32;
+    use crc::{Crc, CRC_32_ISO_HDLC};
+
+    const REF: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+
+    #[test]
+    fn crc32_kat() {
+        assert_eq!(crc32(b""), 0x0000_0000);
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(
+            crc32(b"The quick brown fox jumps over the lazy dog"),
+            0x414F_A339
+        );
+    }
+
+    #[test]
+    fn crc32_differential_vs_crc_crate() {
+        let mut state: u64 = 0x0BAD_F00D_1234_5678;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u8
+        };
+        let mut buf = [0u8; 512];
+        for len in 0..=512usize {
+            for b in buf.iter_mut().take(len) {
+                *b = next();
+            }
+            let s = &buf[..len];
+            assert_eq!(crc32(s), REF.checksum(s), "crc32 differs at len {len}");
+        }
+    }
+}

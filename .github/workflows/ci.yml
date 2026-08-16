@@ -42,9 +42,10 @@ jobs:
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@v2
 
-      # build.rs in several crates assembles x86_64 `.s` files with NASM.
-      - name: Install NASM
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq nasm
+      # build.rs in several crates assembles x86_64 `.s` files with NASM; the
+      # foundation C-probe oracles need a host C compiler.
+      - name: Install NASM + C toolchains (host C-probe oracles)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nasm gcc musl-tools
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -57,16 +58,30 @@ jobs:
           cargo build --workspace --lib --all-features
           cargo build -p morpheus-cli
 
-      - name: Test (host-runnable crates)
+      - name: Test (host-runnable crates + oracles)
         run: |
           cargo test --all-features \
+            -p morpheus-foundation \
             -p iso9660-rs \
             -p morpheus-storage-format \
             -p morpheus-helix \
             -p morpheus-ui \
             -p morpheus-block \
+            -p morpheus-fat32 \
+            -p morpheus-hal-x86_64 \
             -p morpheus-nic \
             -p morpheus-net-stack
+
+      - name: Oracle-boundary guard (no oracle crate in shipped graph)
+        run: |
+          tree=$(cargo tree -e no-dev --target all 2>/dev/null)
+          fail=0
+          for c in libc proptest crc32fast; do
+            if echo "$tree" | grep -qE "(^| )$c v[0-9]"; then
+              echo "::error::$c leaked into the shipped (no-dev) dependency graph"; fail=1
+            fi
+          done
+          exit $fail
 
   boot-smoke:
     name: uefi build · qemu boot

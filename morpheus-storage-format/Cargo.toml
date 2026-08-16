@@ -7,3 +7,8 @@ description = "On-disk format parsers + writers for MorpheusX: GPT, FAT32, and t
 [dependencies]
 gpt_disk_io.workspace = true
 gpt_disk_types.workspace = true
+
+[dev-dependencies]
+crc = "3.3"
+crc32fast = "1.4"
+proptest = "1.6"
