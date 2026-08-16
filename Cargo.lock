@@ -342,15 +342,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "morpheus-cli"
-version = "1.0.1"
-dependencies = [
- "gpt_disk_io",
- "gpt_disk_types",
- "morpheus-helix",
-]
-
-[[package]]
 name = "morpheus-console"
 version = "1.0.1"
 
@@ -464,10 +455,6 @@ dependencies = [
  "gpt_disk_types",
  "proptest",
 ]
-
-[[package]]
-name = "morpheus-ui"
-version = "1.0.1"
 
 [[package]]
 name = "morpheus-virtio"
