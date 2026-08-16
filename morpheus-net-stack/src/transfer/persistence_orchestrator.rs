@@ -251,16 +251,14 @@ impl PersistenceOrchestrator {
             bytes_downloaded: self.bytes_downloaded,
             bytes_written: disk_progress.bytes_written,
             total_bytes: total,
-            download_percent: if total > 0 {
-                ((self.bytes_downloaded * 100) / total).min(100) as u8
-            } else {
-                0
-            },
-            write_percent: if total > 0 {
-                ((disk_progress.bytes_written * 100) / total).min(100) as u8
-            } else {
-                0
-            },
+            download_percent: (self.bytes_downloaded * 100)
+                .checked_div(total)
+                .unwrap_or(0)
+                .min(100) as u8,
+            write_percent: (disk_progress.bytes_written * 100)
+                .checked_div(total)
+                .unwrap_or(0)
+                .min(100) as u8,
             pending_writes: disk_progress.pending_writes,
         }
     }

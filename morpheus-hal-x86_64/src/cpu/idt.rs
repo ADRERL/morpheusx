@@ -843,74 +843,83 @@ pub unsafe fn init_idt() {
 
     IDT.set_handler(
         0,
-        IdtEntry::interrupt_gate(exc_divide_error as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_divide_error as *const () as usize as u64, 0, 0),
     );
-    IDT.set_handler(1, IdtEntry::interrupt_gate(exc_debug as usize as u64, 0, 0));
-    IDT.set_handler(2, IdtEntry::interrupt_gate(exc_nmi as usize as u64, 1, 0)); // IST1
-    IDT.set_handler(3, IdtEntry::trap_gate(exc_breakpoint as usize as u64, 0, 3)); // Allow from userspace
+    IDT.set_handler(
+        1,
+        IdtEntry::interrupt_gate(exc_debug as *const () as usize as u64, 0, 0),
+    );
+    IDT.set_handler(
+        2,
+        IdtEntry::interrupt_gate(exc_nmi as *const () as usize as u64, 1, 0),
+    ); // IST1
+    IDT.set_handler(
+        3,
+        IdtEntry::trap_gate(exc_breakpoint as *const () as usize as u64, 0, 3),
+    ); // Allow from userspace
     IDT.set_handler(
         4,
-        IdtEntry::interrupt_gate(exc_overflow as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_overflow as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         5,
-        IdtEntry::interrupt_gate(exc_bound_range as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_bound_range as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         6,
-        IdtEntry::interrupt_gate(exc_invalid_opcode as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_invalid_opcode as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         7,
-        IdtEntry::interrupt_gate(exc_device_not_available as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_device_not_available as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         8,
-        IdtEntry::interrupt_gate(exc_double_fault as usize as u64, 1, 0),
+        IdtEntry::interrupt_gate(exc_double_fault as *const () as usize as u64, 1, 0),
     ); // IST1
     IDT.set_handler(
         10,
-        IdtEntry::interrupt_gate(exc_invalid_tss as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_invalid_tss as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         11,
-        IdtEntry::interrupt_gate(exc_segment_not_present as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_segment_not_present as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         12,
-        IdtEntry::interrupt_gate(exc_stack_segment as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_stack_segment as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         13,
-        IdtEntry::interrupt_gate(exc_general_protection as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_general_protection as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         14,
-        IdtEntry::interrupt_gate(exc_page_fault as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_page_fault as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         16,
-        IdtEntry::interrupt_gate(exc_x87_fp as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_x87_fp as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         17,
-        IdtEntry::interrupt_gate(exc_alignment_check as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_alignment_check as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         18,
-        IdtEntry::interrupt_gate(exc_machine_check as usize as u64, 1, 0),
+        IdtEntry::interrupt_gate(exc_machine_check as *const () as usize as u64, 1, 0),
     ); // IST1
     IDT.set_handler(
         19,
-        IdtEntry::interrupt_gate(exc_simd_fp as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_simd_fp as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         20,
-        IdtEntry::interrupt_gate(exc_virtualization as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_virtualization as *const () as usize as u64, 0, 0),
     );
     IDT.set_handler(
         21,
-        IdtEntry::interrupt_gate(exc_control_protection as usize as u64, 0, 0),
+        IdtEntry::interrupt_gate(exc_control_protection as *const () as usize as u64, 0, 0),
     );
 
     // Load IDT

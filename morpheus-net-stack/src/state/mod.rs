@@ -174,11 +174,9 @@ impl Progress {
 
     /// 0-100, or 0 if total unknown.
     pub fn percentage(&self) -> u8 {
-        if self.bytes_total == 0 {
-            0
-        } else {
-            ((self.bytes_done * 100) / self.bytes_total) as u8
-        }
+        (self.bytes_done * 100)
+            .checked_div(self.bytes_total)
+            .unwrap_or(0) as u8
     }
 
     pub fn bytes_per_second(&self, now_tsc: u64, tsc_freq: u64) -> u64 {

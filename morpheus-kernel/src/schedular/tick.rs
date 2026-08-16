@@ -46,7 +46,7 @@ unsafe fn ap_idle_context(core_idx: u32) -> &'static CpuContext {
     *ctx = CpuContext::zeroed();
     hal()
         .cpu()
-        .ctx_init_kernel(ctx, ap_idle_hlt_loop as usize as u64, boot_rsp);
+        .ctx_init_kernel(ctx, ap_idle_hlt_loop as *const () as usize as u64, boot_rsp);
     ctx
 }
 

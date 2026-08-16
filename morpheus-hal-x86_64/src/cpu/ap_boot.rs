@@ -105,7 +105,7 @@ unsafe fn setup_trampoline() -> bool {
     core::ptr::write_volatile((AP_TRAMPOLINE_PHYS + TD_CR3) as *mut u64, kernel_cr3);
     core::ptr::write_volatile(
         (AP_TRAMPOLINE_PHYS + TD_ENTRY64) as *mut u64,
-        ap_rust_entry as usize as u64,
+        ap_rust_entry as *const () as usize as u64,
     );
 
     true
