@@ -16,6 +16,7 @@
 /out/
 /bin/
 /target/
+helix/host_tool/target/
 /obj/
 /.next/
 /.next-tmp/

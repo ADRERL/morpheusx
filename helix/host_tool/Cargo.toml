@@ -1,0 +1,15 @@
+[package]
+name = "helix_host_tool"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "host_tool"
+path = "src/main.rs"
+
+[dependencies]
+morpheus-helix = { path = ".." }
+gpt_disk_io = { version = "0.16", default-features = false }
+gpt_disk_types = { version = "0.16", default-features = false }

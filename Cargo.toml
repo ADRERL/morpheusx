@@ -2,11 +2,9 @@
 resolver = "2"
 members = [
     "bootloader",
-    "cli",
     "persistent",
     "iso9660",
     "display",
-    "ui",
     "helix",
     "libmorpheus",
     "morpheus-hal-api",
@@ -24,6 +22,8 @@ members = [
     "morpheus-net-stack",
     "morpheus-kernel",
 ]
+# standalone host tooling, built from its own crate root, never part of this workspace
+exclude = ["helix/host_tool"]
 
 [workspace.package]
 version = "1.0.1"
