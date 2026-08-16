@@ -1,5 +1,5 @@
 //! Process table + round-robin scheduler. PID 0 = kernel, always runnable.
-//! Scheduler enters from the timer ISR. `PROCESS_TABLE` is a fixed static array;
+//! Scheduler enters from the timer ISR. `process_table()` is a fixed static array;
 //! no heap allocation on the scheduling path.
 
 pub mod signals;

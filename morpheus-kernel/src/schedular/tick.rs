@@ -2,11 +2,11 @@ use super::lifecycle::terminate_process_inner;
 use super::state::{
     cleanup_stale_waiters, clear_futex_waiter, clear_waiter_all, core_should_park,
     mark_core_active_tsc, mark_core_idle_enter, mark_core_idle_exit, mark_core_idle_tick,
-    record_tier_hit, refresh_balanced_system_mode, scheduler_system_state, set_percpu_fpu_ptr,
-    set_percpu_next_cr3, set_this_core_pid, this_core_index, this_core_pid, transition_core_state,
-    update_core_load_ewma, update_park_hysteresis, SchedulerCoreState, SchedulerSystemState,
-    SchedulerTransitionReason, IDLE_TSC_TOTAL, KERNEL_CR3, KERNEL_HLT_ENTRY_TSC,
-    KERNEL_LAST_WAS_IDLE, KERNEL_SKIP_STREAK, MAX_CPUS, MAX_KERNEL_SKIP, PROCESS_TABLE,
+    process_table, record_tier_hit, refresh_balanced_system_mode, scheduler_system_state,
+    set_percpu_fpu_ptr, set_percpu_next_cr3, set_this_core_pid, this_core_index, this_core_pid,
+    transition_core_state, update_core_load_ewma, update_park_hysteresis, SchedulerCoreState,
+    SchedulerSystemState, SchedulerTransitionReason, IDLE_TSC_TOTAL, KERNEL_CR3,
+    KERNEL_HLT_ENTRY_TSC, KERNEL_LAST_WAS_IDLE, KERNEL_SKIP_STREAK, MAX_CPUS, MAX_KERNEL_SKIP,
     PROCESS_TABLE_LOCK, TICK_COUNT,
 };
 use crate::hal;
@@ -116,7 +116,7 @@ pub unsafe extern "C" fn scheduler_tick(current_ctx: &CpuContext) -> &'static Cp
         mark_core_idle_exit(core_idx, now_tsc);
         mark_core_active_tsc(core_idx, now_tsc);
         set_this_core_pid(next_pid as u32);
-        let result = if let Some(Some(next)) = PROCESS_TABLE.get_mut(next_pid) {
+        let result = if let Some(Some(next)) = process_table().get_mut(next_pid) {
             next.state = ProcessState::Running;
             next.run_start_tsc = now_tsc;
             next.running_on = core_idx;
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn scheduler_tick(current_ctx: &CpuContext) -> &'static Cp
         KERNEL_LAST_WAS_IDLE.store(kernel_was_idle, Ordering::Relaxed);
     }
 
-    if let Some(Some(cur)) = PROCESS_TABLE.get_mut(cur_pid) {
+    if let Some(Some(cur)) = process_table().get_mut(cur_pid) {
         cur.context = *current_ctx;
 
         // Ring-3 frames need RPL=3 on SS. CpuContext is opaque, so route
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn scheduler_tick(current_ctx: &CpuContext) -> &'static Cp
     mark_core_active_tsc(core_idx, now_tsc);
     set_this_core_pid(next_pid as u32);
 
-    let result = if let Some(Some(next)) = PROCESS_TABLE.get_mut(next_pid) {
+    let result = if let Some(Some(next)) = process_table().get_mut(next_pid) {
         next.state = ProcessState::Running;
         next.run_start_tsc = now_tsc;
         next.running_on = core_idx;
@@ -275,7 +275,7 @@ pub unsafe extern "C" fn scheduler_tick(current_ctx: &CpuContext) -> &'static Cp
         set_this_core_pid(0);
         set_percpu_fpu_ptr(0);
         set_percpu_next_cr3(KERNEL_CR3);
-        if let Some(Some(cur)) = PROCESS_TABLE.get(cur_pid) {
+        if let Some(Some(cur)) = process_table().get(cur_pid) {
             &cur.context
         } else {
             core::mem::transmute::<&CpuContext, &'static CpuContext>(current_ctx)
@@ -301,7 +301,7 @@ pub(super) unsafe fn wake_expired_sleepers() {
     let mut found_any = false;
     let mut new_earliest = u64::MAX;
 
-    for proc in PROCESS_TABLE.iter_mut().flatten() {
+    for proc in process_table().iter_mut().flatten() {
         match proc.state {
             ProcessState::Blocked(BlockReason::Sleep(deadline)) => {
                 if now >= deadline {
@@ -471,7 +471,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
 
     // BSP ages ready tasks each tick; bounds starvation.
     if is_bsp {
-        for proc in PROCESS_TABLE.iter_mut().flatten() {
+        for proc in process_table().iter_mut().flatten() {
             if proc.state == ProcessState::Ready && proc.running_on == u32::MAX {
                 proc.sched_wait_ticks = proc.sched_wait_ticks.saturating_add(1);
             } else if proc.state != ProcessState::Running {
@@ -482,7 +482,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
     }
 
     let mut ready_count = 0u32;
-    for p in PROCESS_TABLE.iter().flatten() {
+    for p in process_table().iter().flatten() {
         if p.state == ProcessState::Ready && p.running_on == u32::MAX {
             ready_count = ready_count.saturating_add(1);
         }
@@ -502,7 +502,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
         if candidate == 0 && (!is_bsp || skip_kernel) {
             continue;
         }
-        if let Some(Some(p)) = PROCESS_TABLE.get(candidate) {
+        if let Some(Some(p)) = process_table().get(candidate) {
             if p.running_on == u32::MAX
                 && p.state == ProcessState::Ready
                 && p.sched_wait_ticks >= STARVATION_FORCE_TICKS
@@ -515,7 +515,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
 
     if let Some(candidate) = forced_starving {
         record_tier_hit(1);
-        if let Some(Some(p)) = PROCESS_TABLE.get_mut(candidate) {
+        if let Some(Some(p)) = process_table().get_mut(candidate) {
             if p.sched_budget_left == 0 {
                 p.effective_weight_cache = effective_weight(system_state, p);
                 p.sched_budget_left = p.effective_weight_cache;
@@ -543,7 +543,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
         if candidate == 0 && (!is_bsp || skip_kernel) {
             continue;
         }
-        if let Some(Some(p)) = PROCESS_TABLE.get(candidate) {
+        if let Some(Some(p)) = process_table().get(candidate) {
             if p.running_on != u32::MAX {
                 continue;
             }
@@ -565,7 +565,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
     }
 
     if let Some((candidate, _)) = best_candidate {
-        if let Some(Some(pm)) = PROCESS_TABLE.get_mut(candidate) {
+        if let Some(Some(pm)) = process_table().get_mut(candidate) {
             pm.sched_budget_left = pm.sched_budget_left.saturating_sub(1);
             pm.sched_wait_ticks = 0;
         }
@@ -580,7 +580,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
     }
 
     // Epoch rollover: no one had budget, refill ready tasks by priority weight.
-    for proc in PROCESS_TABLE.iter_mut().flatten() {
+    for proc in process_table().iter_mut().flatten() {
         if proc.state == ProcessState::Ready && proc.running_on == u32::MAX {
             proc.effective_weight_cache = effective_weight(system_state, proc);
             proc.sched_budget_left = proc.effective_weight_cache;
@@ -593,7 +593,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
         if candidate == 0 && (!is_bsp || skip_kernel) {
             continue;
         }
-        if let Some(Some(p)) = PROCESS_TABLE.get(candidate) {
+        if let Some(Some(p)) = process_table().get(candidate) {
             if p.running_on != u32::MAX {
                 continue;
             }
@@ -615,7 +615,7 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
     }
 
     if let Some((candidate, _)) = best_candidate {
-        if let Some(Some(pm)) = PROCESS_TABLE.get_mut(candidate) {
+        if let Some(Some(pm)) = process_table().get_mut(candidate) {
             pm.sched_budget_left = pm.sched_budget_left.saturating_sub(1);
             pm.sched_wait_ticks = 0;
         }
@@ -634,12 +634,12 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
         KERNEL_SKIP_STREAK.store(0, Ordering::Relaxed);
         for delta in 1..=n {
             let candidate = (current + delta) % n;
-            if let Some(Some(p)) = PROCESS_TABLE.get(candidate) {
+            if let Some(Some(p)) = process_table().get(candidate) {
                 if p.running_on != u32::MAX {
                     continue;
                 }
                 if p.state == ProcessState::Ready {
-                    if let Some(Some(pm)) = PROCESS_TABLE.get_mut(candidate) {
+                    if let Some(Some(pm)) = process_table().get_mut(candidate) {
                         if pm.sched_budget_left == 0 {
                             pm.effective_weight_cache = effective_weight(system_state, pm);
                             pm.sched_budget_left = pm.effective_weight_cache;
@@ -653,11 +653,11 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
         }
     }
 
-    if let Some(Some(p)) = PROCESS_TABLE.get(current) {
+    if let Some(Some(p)) = process_table().get(current) {
         // Boot-critical scheduler guard: keep the explicit "idle on AP" form verbatim.
         #[allow(clippy::nonminimal_bool)]
         if p.state.is_runnable() && !(current == 0 && !is_bsp) {
-            if let Some(Some(pm)) = PROCESS_TABLE.get_mut(current) {
+            if let Some(Some(pm)) = process_table().get_mut(current) {
                 if pm.sched_budget_left == 0 {
                     pm.effective_weight_cache = effective_weight(system_state, pm);
                     pm.sched_budget_left = pm.effective_weight_cache;
@@ -672,7 +672,10 @@ unsafe fn pick_next(current: usize, skip_kernel: bool, core_idx: u32) -> usize {
 }
 
 pub(super) unsafe fn deliver_pending_signals(pid: u32) {
-    let proc = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
+    let proc = match process_table()
+        .get_mut(pid as usize)
+        .and_then(|s| s.as_mut())
+    {
         Some(p) => p,
         None => return,
     };

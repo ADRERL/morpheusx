@@ -5,7 +5,7 @@ extern crate alloc;
 use super::common::*;
 use crate::hal;
 use crate::process::ProcessState;
-use crate::schedular::{PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER};
+use crate::schedular::{process_table, PROCESS_TABLE_LOCK, SCHEDULER};
 use alloc::vec::Vec;
 use morpheus_foundation::errno::E2BIG;
 use morpheus_foundation::flags::open_flags::{O_PIPE_READ, O_PIPE_WRITE};
@@ -207,7 +207,7 @@ unsafe fn child_fd_close(child_pid: u32, fd: i32) -> Result<(), u64> {
     if fd < 0 {
         return Err(EBADF);
     }
-    let child = match PROCESS_TABLE
+    let child = match process_table()
         .get_mut(child_pid as usize)
         .and_then(|s| s.as_mut())
     {
@@ -248,7 +248,7 @@ unsafe fn child_fd_dup2(child_pid: u32, old_fd: i32, new_fd: i32) -> Result<(), 
         return Err(EBADF);
     }
     if old_fd == new_fd {
-        let child = PROCESS_TABLE
+        let child = process_table()
             .get(child_pid as usize)
             .and_then(|s| s.as_ref())
             .ok_or(ESRCH)?;
@@ -261,7 +261,7 @@ unsafe fn child_fd_dup2(child_pid: u32, old_fd: i32, new_fd: i32) -> Result<(), 
     // Close any existing new_fd first (POSIX dup2 semantics).
     let _ = child_fd_close(child_pid, new_fd);
 
-    let child = match PROCESS_TABLE
+    let child = match process_table()
         .get_mut(child_pid as usize)
         .and_then(|s| s.as_mut())
     {
@@ -295,7 +295,7 @@ unsafe fn child_fd_dup2(child_pid: u32, old_fd: i32, new_fd: i32) -> Result<(), 
 /// PROCESS_TABLE_LOCK held by caller. Set the child's cwd.
 unsafe fn child_chdir(child_pid: u32, path_ptr: u64, path_len: u64) -> Result<(), u64> {
     let path = user_path(path_ptr, path_len).ok_or(EINVAL)?;
-    let child = PROCESS_TABLE
+    let child = process_table()
         .get_mut(child_pid as usize)
         .and_then(|s| s.as_mut())
         .ok_or(ESRCH)?;
@@ -337,7 +337,7 @@ unsafe fn child_fd_open(
     drop(guard);
 
     let _ = child_fd_close(child_pid, fd);
-    let child = PROCESS_TABLE
+    let child = process_table()
         .get_mut(child_pid as usize)
         .and_then(|s| s.as_mut())
         .ok_or(ESRCH)?;
@@ -353,7 +353,7 @@ unsafe fn child_fd_null(child_pid: u32, fd: i32) -> Result<(), u64> {
         return Err(EBADF);
     }
     let _ = child_fd_close(child_pid, fd);
-    let child = PROCESS_TABLE
+    let child = process_table()
         .get_mut(child_pid as usize)
         .and_then(|s| s.as_mut())
         .ok_or(ESRCH)?;
@@ -535,7 +535,7 @@ pub unsafe fn sys_reparent(target_pid: u64, new_parent_pid: u64) -> u64 {
 
     // The new parent must exist and be live — no adopting onto a dead/free slot.
     let new_parent_live = matches!(
-        PROCESS_TABLE.get(new_parent).and_then(|s| s.as_ref()),
+        process_table().get(new_parent).and_then(|s| s.as_ref()),
         Some(p) if !p.is_free()
             && !matches!(p.state, ProcessState::Zombie | ProcessState::Terminated)
     );
@@ -545,7 +545,7 @@ pub unsafe fn sys_reparent(target_pid: u64, new_parent_pid: u64) -> u64 {
     }
 
     // The target must exist; read its current parent to decide permission.
-    let cur_parent = match PROCESS_TABLE.get(target).and_then(|s| s.as_ref()) {
+    let cur_parent = match process_table().get(target).and_then(|s| s.as_ref()) {
         Some(p) if !p.is_free() => p.parent_pid as usize,
         _ => {
             PROCESS_TABLE_LOCK.unlock();
@@ -555,7 +555,7 @@ pub unsafe fn sys_reparent(target_pid: u64, new_parent_pid: u64) -> u64 {
 
     let handoff = caller == cur_parent;
     let cur_parent_live = matches!(
-        PROCESS_TABLE.get(cur_parent).and_then(|s| s.as_ref()),
+        process_table().get(cur_parent).and_then(|s| s.as_ref()),
         Some(p) if !p.is_free()
             && !matches!(p.state, ProcessState::Zombie | ProcessState::Terminated)
     );
@@ -565,7 +565,7 @@ pub unsafe fn sys_reparent(target_pid: u64, new_parent_pid: u64) -> u64 {
         return EPERM;
     }
 
-    if let Some(Some(t)) = PROCESS_TABLE.get_mut(target) {
+    if let Some(Some(t)) = process_table().get_mut(target) {
         t.parent_pid = new_parent as u32;
     }
     PROCESS_TABLE_LOCK.unlock();

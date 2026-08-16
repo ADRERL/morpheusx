@@ -249,7 +249,7 @@ mod ofd {
 /// Per-process fd table. Bounded (DoS limit, not an array-as-capacity decision)
 /// and **not `Copy`** — duplicating one across processes must be explicit, so the
 /// per-mount `open_fds` refcount stays accurate. Const-constructible for the
-/// `PROCESS_TABLE` static.
+/// `process_table()` static.
 pub const FD_TABLE_LEN: usize = 64;
 
 pub struct FdTable {

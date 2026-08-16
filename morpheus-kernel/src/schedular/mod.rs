@@ -22,4 +22,4 @@ pub use wake::{wake_futex_waiters, wake_input_reader, wake_pipe_readers, wake_st
 pub use state::{
     clear_input_waiter, mark_futex_waiter, mark_input_waiter, mark_pipe_waiter, mark_stdin_waiter,
 };
-pub use state::{PROCESS_TABLE, PROCESS_TABLE_LOCK};
+pub use state::{init_process_table, process_table, PROCESS_TABLE_LOCK};

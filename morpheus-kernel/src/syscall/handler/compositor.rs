@@ -5,7 +5,7 @@ use super::fb::COMPOSITOR_PID;
 use super::hw::sys_map_phys;
 use super::nic_fb::fb_registered;
 use crate::process::ProcessState;
-use crate::schedular::{PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER};
+use crate::schedular::{process_table, PROCESS_TABLE_LOCK, SCHEDULER};
 
 /// Surface entry returned by SYS_WIN_SURFACE_LIST.
 pub use morpheus_foundation::types::SurfaceEntry;
@@ -44,7 +44,7 @@ pub unsafe fn sys_win_surface_list(buf_ptr: u64, max_count: u64) -> u64 {
     let mut total = 0u64;
     {
         PROCESS_TABLE_LOCK.lock();
-        for proc in PROCESS_TABLE.iter().flatten() {
+        for proc in process_table().iter().flatten() {
             if !proc.is_free()
                 && !matches!(proc.state, ProcessState::Zombie)
                 && proc.fb_surface_phys != 0
@@ -70,7 +70,7 @@ pub unsafe fn sys_win_surface_list(buf_ptr: u64, max_count: u64) -> u64 {
 
     {
         PROCESS_TABLE_LOCK.lock();
-        for slot in PROCESS_TABLE.iter() {
+        for slot in process_table().iter() {
             if written >= max_count as usize {
                 break;
             }
@@ -110,7 +110,7 @@ pub unsafe fn sys_win_surface_map(target_pid: u64) -> u64 {
 
     let (phys, pages) = {
         PROCESS_TABLE_LOCK.lock();
-        let result = match PROCESS_TABLE.get(target_pid_u32 as usize) {
+        let result = match process_table().get(target_pid_u32 as usize) {
             Some(Some(proc)) if !proc.is_free() && proc.fb_surface_phys != 0 => {
                 Some((proc.fb_surface_phys, proc.fb_surface_pages))
             },
@@ -138,7 +138,7 @@ pub unsafe fn sys_mouse_forward(target_pid: u64, packed: u64) -> u64 {
     let buttons = (packed >> 32) as u8;
 
     PROCESS_TABLE_LOCK.lock();
-    let result = match PROCESS_TABLE.get_mut(target_pid_u32 as usize) {
+    let result = match process_table().get_mut(target_pid_u32 as usize) {
         Some(Some(proc)) if !proc.is_free() => {
             proc.mouse_dx = proc.mouse_dx.saturating_add(dx);
             proc.mouse_dy = proc.mouse_dy.saturating_add(dy);
@@ -160,7 +160,7 @@ pub unsafe fn sys_win_surface_dirty_clear(target_pid: u64) -> u64 {
     let target_pid_u32 = target_pid as u32;
 
     PROCESS_TABLE_LOCK.lock();
-    let result = match PROCESS_TABLE.get_mut(target_pid_u32 as usize) {
+    let result = match process_table().get_mut(target_pid_u32 as usize) {
         Some(Some(proc)) if !proc.is_free() => {
             proc.fb_surface_dirty = false;
             0
@@ -193,7 +193,7 @@ pub unsafe fn sys_forward_input(target_pid: u64, ptr: u64, len: u64) -> u64 {
     let data = core::slice::from_raw_parts(ptr as *const u8, len as usize);
 
     PROCESS_TABLE_LOCK.lock();
-    let written = match PROCESS_TABLE.get_mut(target as usize) {
+    let written = match process_table().get_mut(target as usize) {
         Some(Some(proc)) if !proc.is_free() => {
             let mut n = 0usize;
             for &byte in data {
@@ -212,7 +212,7 @@ pub unsafe fn sys_forward_input(target_pid: u64, ptr: u64, len: u64) -> u64 {
             return EINVAL;
         },
     };
-    if let Some(Some(proc)) = PROCESS_TABLE.get_mut(target as usize) {
+    if let Some(Some(proc)) = process_table().get_mut(target as usize) {
         if matches!(
             proc.state,
             ProcessState::Blocked(crate::process::BlockReason::InputRead)

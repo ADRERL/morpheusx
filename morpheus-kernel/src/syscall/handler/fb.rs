@@ -95,8 +95,8 @@ pub unsafe fn release_fb_lock_if_holder(pid: u32) {
     // writing to invisible surfaces while present/blit silently target the
     // real back buffer (children's display freezes).
     if COMPOSITOR_PID.load(Relaxed) == pid {
-        use crate::schedular::PROCESS_TABLE;
-        for proc in PROCESS_TABLE.iter().flatten() {
+        use crate::schedular::process_table;
+        for proc in process_table().iter().flatten() {
             if !proc.is_free() && proc.pid != pid && proc.fb_surface_phys != 0 {
                 let _ =
                     SCHEDULER.send_signal_inner(proc.pid, crate::process::signals::Signal::SIGKILL);

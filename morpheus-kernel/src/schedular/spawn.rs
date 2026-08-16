@@ -1,5 +1,5 @@
 use super::lifecycle::apply_default_scheduler_policy;
-use super::state::{this_core_pid, LIVE_COUNT, PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER_READY};
+use super::state::{process_table, this_core_pid, LIVE_COUNT, PROCESS_TABLE_LOCK, SCHEDULER_READY};
 use crate::hal;
 use crate::process::{
     BlockReason, CpuContext, Process, ProcessState, MAX_PROCESSES, MAX_USER_PROCESSES,
@@ -16,7 +16,7 @@ const USER_STACK_TOP: u64 = 0x0000_007F_FFFF_F000;
 /// excluded — they draw from the separate thread budget, not this cap.
 unsafe fn count_user_processes() -> usize {
     let mut n = 0;
-    for slot in PROCESS_TABLE.iter().flatten() {
+    for slot in process_table().iter().flatten() {
         if !slot.is_free() && slot.pid != 0 && !slot.is_thread() {
             n += 1;
         }
@@ -28,7 +28,7 @@ unsafe fn count_user_processes() -> usize {
 unsafe fn find_free_slot() -> Option<usize> {
     super::wait::reap_detached_zombies();
     (1..MAX_PROCESSES).find(|&i| {
-        PROCESS_TABLE[i]
+        process_table()[i]
             .as_ref()
             .map(|p| p.is_free())
             .unwrap_or(true)
@@ -53,7 +53,7 @@ pub unsafe fn spawn_user_thread(
     PROCESS_TABLE_LOCK.lock();
 
     let parent_pid = this_core_pid();
-    let parent = match PROCESS_TABLE
+    let parent = match process_table()
         .get(parent_pid as usize)
         .and_then(|s| s.as_ref())
     {
@@ -86,8 +86,8 @@ pub unsafe fn spawn_user_thread(
     // Fresh occupant of a reused slot starts with blocking stdin.
     crate::process::set_stdin_nonblock(tid, false);
 
-    PROCESS_TABLE[slot_idx] = Some(Process::empty());
-    let thread = PROCESS_TABLE[slot_idx].as_mut().ok_or_else(|| {
+    process_table()[slot_idx] = Some(Process::empty());
+    let thread = process_table()[slot_idx].as_mut().ok_or_else(|| {
         PROCESS_TABLE_LOCK.unlock();
         "failed to initialize thread slot"
     })?;
@@ -107,7 +107,7 @@ pub unsafe fn spawn_user_thread(
     thread.detached = flags & THREAD_DETACHED != 0;
     apply_default_scheduler_policy(thread, false);
 
-    if let Some(Some(parent_ref)) = PROCESS_TABLE.get(parent_pid as usize) {
+    if let Some(Some(parent_ref)) = process_table().get(parent_pid as usize) {
         thread.importance_16 = parent_ref.importance_16;
         thread.power_mode = parent_ref.power_mode;
         thread.policy_class = parent_ref.policy_class;
@@ -117,7 +117,7 @@ pub unsafe fn spawn_user_thread(
     }
 
     if let Err(e) = thread.alloc_kernel_stack() {
-        PROCESS_TABLE[slot_idx] = None;
+        process_table()[slot_idx] = None;
         PROCESS_TABLE_LOCK.unlock();
         return Err(e);
     }
@@ -236,7 +236,7 @@ pub unsafe fn spawn_user_process(
     match cwd {
         Some(p) => proc.set_cwd(p),
         None => {
-            if let Some(Some(parent)) = PROCESS_TABLE.get(proc.parent_pid as usize) {
+            if let Some(Some(parent)) = process_table().get(proc.parent_pid as usize) {
                 proc.cwd = parent.cwd;
                 proc.cwd_len = parent.cwd_len;
             }
@@ -245,7 +245,7 @@ pub unsafe fn spawn_user_process(
 
     if inherit_fds && !clear_fds {
         let parent_pid = proc.parent_pid as usize;
-        if let Some(Some(parent)) = PROCESS_TABLE.get(parent_pid) {
+        if let Some(Some(parent)) = process_table().get(parent_pid) {
             // SAFETY: parent and proc are distinct slots; copy out a raw ptr to
             // sidestep the borrow on the shared static table.
             let parent_ref: &Process = &*(parent as *const Process);
@@ -287,7 +287,7 @@ pub unsafe fn spawn_user_process(
     let _ = (pid, image.entry, proc.cr3);
     crate::serial::log_info("SCHED", 771, "user process spawned");
 
-    PROCESS_TABLE[slot_idx] = Some(proc);
+    process_table()[slot_idx] = Some(proc);
     LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
 
     PROCESS_TABLE_LOCK.unlock();
@@ -298,7 +298,7 @@ pub unsafe fn spawn_user_process(
 /// `sys_spawn` has replayed its file_actions[]. No-op on a freed slot.
 pub unsafe fn mark_ready(pid: u32) {
     PROCESS_TABLE_LOCK.lock();
-    if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid as usize) {
+    if let Some(Some(proc)) = process_table().get_mut(pid as usize) {
         if !proc.is_free() {
             proc.state = ProcessState::Ready;
         }
@@ -315,7 +315,7 @@ pub unsafe fn mark_ready(pid: u32) {
 /// it into the reap sweep.
 pub unsafe fn destroy_deferred_child(pid: u32) {
     PROCESS_TABLE_LOCK.lock();
-    if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid as usize) {
+    if let Some(Some(proc)) = process_table().get_mut(pid as usize) {
         proc.detached = true;
         super::lifecycle::terminate_process_inner(proc, 0, 9);
     }

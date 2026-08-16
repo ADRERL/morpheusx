@@ -63,6 +63,7 @@ jobs:
             -p iso9660-rs \
             -p morpheus-storage-format \
             -p morpheus-helix \
+            -p morpheus-kernel \
             -p morpheus-block \
             -p morpheus-fat32 \
             -p morpheus-hal-x86_64 \

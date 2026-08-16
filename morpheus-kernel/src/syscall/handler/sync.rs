@@ -5,7 +5,7 @@ use super::fb::is_composited_client;
 use crate::hal;
 use crate::mouse;
 use crate::process::{BlockReason, ProcessState};
-use crate::schedular::{PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER};
+use crate::schedular::{process_table, PROCESS_TABLE_LOCK, SCHEDULER};
 use morpheus_hal_api::Pml4Handle;
 
 use morpheus_foundation::errno::ETIMEDOUT;
@@ -70,7 +70,7 @@ pub unsafe fn sys_futex(addr: u64, op: u64, val: u64, timeout_ptr: u64) -> u64 {
                 return EAGAIN;
             }
 
-            if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid as usize) {
+            if let Some(Some(proc)) = process_table().get_mut(pid as usize) {
                 proc.futex_timed_out = false;
                 crate::schedular::mark_futex_waiter(pid, addr);
                 proc.state = ProcessState::Blocked(BlockReason::FutexWait(addr));
@@ -211,7 +211,10 @@ pub unsafe fn sys_thread_detach(tid: u64) -> u64 {
     }
     let caller_leader = SCHEDULER.current_memory_leader_pid();
     PROCESS_TABLE_LOCK.lock();
-    let r = match PROCESS_TABLE.get_mut(tid as usize).and_then(|s| s.as_mut()) {
+    let r = match process_table()
+        .get_mut(tid as usize)
+        .and_then(|s| s.as_mut())
+    {
         Some(p) if !p.is_free() => {
             let same_group = p.is_thread() && p.thread_group_leader == caller_leader;
             if same_group || p.parent_pid == caller_leader {

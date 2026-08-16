@@ -1,7 +1,7 @@
 use super::state::{
-    clear_waiter_all, sample_idle_tsc_total,
+    clear_waiter_all, process_table, sample_idle_tsc_total,
     sample_per_core_idle_tsc as state_sample_per_core_idle_tsc, set_percpu_fpu_ptr,
-    set_this_core_pid, this_core_pid, KERNEL_CR3, KERNEL_HLT_ENTRY_TSC, LIVE_COUNT, PROCESS_TABLE,
+    set_this_core_pid, this_core_pid, KERNEL_CR3, KERNEL_HLT_ENTRY_TSC, LIVE_COUNT,
     PROCESS_TABLE_LOCK, SCHEDULER_READY, TIMED_BLOCK_COUNT, TSC_FREQUENCY,
 };
 use crate::hal;
@@ -77,12 +77,12 @@ pub unsafe fn init_scheduler() {
     kernel_proc.cr3 = cr3 & 0x000F_FFFF_FFFF_F000;
     KERNEL_CR3 = kernel_proc.cr3;
 
-    PROCESS_TABLE[0] = Some(kernel_proc);
+    process_table()[0] = Some(kernel_proc);
     LIVE_COUNT.store(1, Ordering::SeqCst);
     set_this_core_pid(0);
     SCHEDULER_READY = true;
 
-    if let Some(p) = PROCESS_TABLE[0].as_mut() {
+    if let Some(p) = process_table()[0].as_mut() {
         // PID 0 skips alloc_kernel_stack (no kernel stack), so seed FPU control
         // words here (FCW=0x037F, MXCSR=0x1F80); spawned procs get this from
         // alloc_kernel_stack instead.
@@ -105,7 +105,7 @@ pub unsafe fn spawn_kernel_thread(
 
     let slot_idx = (1..MAX_PROCESSES)
         .find(|&i| {
-            PROCESS_TABLE[i]
+            process_table()[i]
                 .as_ref()
                 .map(|p| p.is_free())
                 .unwrap_or(true)
@@ -144,7 +144,7 @@ pub unsafe fn spawn_kernel_thread(
     let _ = (pid, entry_fn);
     crate::serial::log_info("SCHED", 770, "kernel thread spawned");
 
-    PROCESS_TABLE[slot_idx] = Some(proc);
+    process_table()[slot_idx] = Some(proc);
     LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
 
     PROCESS_TABLE_LOCK.unlock();
@@ -162,7 +162,7 @@ pub unsafe fn exit_process(code: i32) -> ! {
     // space any joining sibling reads. Done outside the table lock (the wake takes
     // it itself); a joiner that observes 0 returns from join without racing the
     // reap. The slot itself is reaped later, off this (in-use) kernel stack.
-    let ctid = PROCESS_TABLE
+    let ctid = process_table()
         .get(pid as usize)
         .and_then(|s| s.as_ref())
         .map(|p| p.ctid_ptr)
@@ -173,7 +173,7 @@ pub unsafe fn exit_process(code: i32) -> ! {
     }
 
     PROCESS_TABLE_LOCK.lock();
-    if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid as usize) {
+    if let Some(Some(proc)) = process_table().get_mut(pid as usize) {
         terminate_process_inner(proc, code, 0);
     }
     PROCESS_TABLE_LOCK.unlock();
@@ -239,7 +239,7 @@ pub(super) unsafe fn terminate_process_inner(proc: &mut Process, code: i32, term
         if idx == child_pid as usize {
             continue;
         }
-        if let Some(Some(p)) = PROCESS_TABLE.get_mut(idx) {
+        if let Some(Some(p)) = process_table().get_mut(idx) {
             if let ProcessState::Blocked(BlockReason::WaitChild(waited)) = p.state {
                 if waited == child_pid || waited == 0 {
                     p.state = ProcessState::Ready;
@@ -254,7 +254,7 @@ pub(super) unsafe fn terminate_process_inner(proc: &mut Process, code: i32, term
             }
         }
     }
-    if let Some(Some(parent)) = PROCESS_TABLE.get_mut(parent_pid as usize) {
+    if let Some(Some(parent)) = process_table().get_mut(parent_pid as usize) {
         parent.pending_signals.raise(Signal::SIGCHLD);
     }
 }

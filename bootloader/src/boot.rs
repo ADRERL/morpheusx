@@ -753,6 +753,10 @@ unsafe fn stage_c1_platform_init(ctx: &BootContext) -> PlatformInit {
     //
     // SAFETY: BSP, single-threaded; `HalImpl::new()` has no hardware
     // preconditions (it's a zero-sized struct), so it's safe pre-phase-1.
+    // the process table lives in .bss; it must be written before platform
+    // init runs, since phase 9 hooks already call into kernel code.
+    unsafe { morpheus_kernel::schedular::init_process_table() };
+
     morpheus_kernel::install_hal(unsafe { morpheus_hal_x86_64::platform::init() });
 
     // Keep the pre-EBS HelixFS image out of the buddy: it's UEFI LoaderData

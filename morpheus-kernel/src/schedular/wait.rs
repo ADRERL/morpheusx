@@ -1,5 +1,5 @@
 use super::state::{
-    this_core_pid, ADDRESS_SPACE_LOCKS, EARLIEST_DEADLINE, PROCESS_TABLE, PROCESS_TABLE_LOCK,
+    process_table, this_core_pid, ADDRESS_SPACE_LOCKS, EARLIEST_DEADLINE, PROCESS_TABLE_LOCK,
     TIMED_BLOCK_COUNT,
 };
 use crate::hal;
@@ -16,7 +16,7 @@ const PAGE_SIZE: u64 = 4096;
 /// Thread-group leader (process identity) of `pid`; `pid` itself if independent.
 #[inline]
 unsafe fn leader_of(pid: u32) -> u32 {
-    PROCESS_TABLE
+    process_table()
         .get(pid as usize)
         .and_then(|s| s.as_ref())
         .map(|p| {
@@ -33,7 +33,10 @@ unsafe fn leader_of(pid: u32) -> u32 {
 /// (process wait) or a sibling thread in the same group (join-from-ANY-thread).
 unsafe fn can_reap(caller: u32, target: u32) -> bool {
     let caller_leader = leader_of(caller);
-    let t = match PROCESS_TABLE.get(target as usize).and_then(|s| s.as_ref()) {
+    let t = match process_table()
+        .get(target as usize)
+        .and_then(|s| s.as_ref())
+    {
         Some(p) => p,
         None => return false,
     };
@@ -55,7 +58,7 @@ fn encode_wstatus(proc: &Process) -> i32 {
 pub unsafe fn block_sleep(deadline: u64) -> u64 {
     let pid = this_core_pid() as usize;
     PROCESS_TABLE_LOCK.lock();
-    if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid) {
+    if let Some(Some(proc)) = process_table().get_mut(pid) {
         proc.state = ProcessState::Blocked(BlockReason::Sleep(deadline));
         TIMED_BLOCK_COUNT.fetch_add(1, Ordering::Relaxed);
         // Race-free min update — used by tick fast-path.
@@ -88,7 +91,7 @@ pub unsafe fn block_sleep(deadline: u64) -> u64 {
 /// The Zombie→Terminated transition under the table lock makes double-reap
 /// (SYS_THREAD_JOIN racing SYS_WAIT on the same tid) impossible.
 unsafe fn reap_zombie(pid: u32) -> Option<(i32, i32)> {
-    let child = PROCESS_TABLE.get_mut(pid as usize)?.as_mut()?;
+    let child = process_table().get_mut(pid as usize)?.as_mut()?;
     // Don't free page tables while another core's CR3 still points at them.
     if child.running_on != u32::MAX {
         return None;
@@ -119,7 +122,7 @@ unsafe fn reclaim_thread_vmas(leader_pid: u32, tid: u32) {
     let lock = &ADDRESS_SPACE_LOCKS[leader_pid as usize];
     lock.lock();
 
-    let leader = match PROCESS_TABLE
+    let leader = match process_table()
         .get_mut(leader_pid as usize)
         .and_then(|s| s.as_mut())
     {
@@ -159,7 +162,7 @@ unsafe fn reclaim_thread_vmas(leader_pid: u32, tid: u32) {
 /// JoinHandle doesn't leak a slot. Caller holds PROCESS_TABLE_LOCK.
 pub(crate) unsafe fn reap_detached_zombies() {
     for idx in 1..MAX_PROCESSES {
-        if let Some(Some(p)) = PROCESS_TABLE.get(idx) {
+        if let Some(Some(p)) = process_table().get(idx) {
             if p.detached && p.state == ProcessState::Zombie && p.running_on == u32::MAX {
                 let _ = reap_zombie(idx as u32);
             }
@@ -176,7 +179,10 @@ pub unsafe fn wait_for_child(target: u32) -> u64 {
     loop {
         PROCESS_TABLE_LOCK.lock();
 
-        let state = match PROCESS_TABLE.get(target as usize).and_then(|s| s.as_ref()) {
+        let state = match process_table()
+            .get(target as usize)
+            .and_then(|s| s.as_ref())
+        {
             Some(p) => p.state,
             None => {
                 PROCESS_TABLE_LOCK.unlock();
@@ -208,7 +214,7 @@ pub unsafe fn wait_for_child(target: u32) -> u64 {
             }
         }
 
-        if let Some(Some(proc)) = PROCESS_TABLE.get_mut(current as usize) {
+        if let Some(Some(proc)) = process_table().get_mut(current as usize) {
             proc.state = ProcessState::Blocked(BlockReason::WaitChild(target));
         }
         PROCESS_TABLE_LOCK.unlock();
@@ -222,7 +228,10 @@ pub unsafe fn try_wait_child(target: u32) -> u64 {
 
     PROCESS_TABLE_LOCK.lock();
 
-    let state = match PROCESS_TABLE.get(target as usize).and_then(|s| s.as_ref()) {
+    let state = match process_table()
+        .get(target as usize)
+        .and_then(|s| s.as_ref())
+    {
         Some(p) => p.state,
         None => {
             PROCESS_TABLE_LOCK.unlock();
@@ -267,7 +276,7 @@ pub unsafe fn do_wait(idtype: u64, id: u32, options: u64) -> (u64, i32) {
         let mut ready: Option<u32> = None;
 
         match idtype {
-            P_PID => match PROCESS_TABLE.get(id as usize).and_then(|s| s.as_ref()) {
+            P_PID => match process_table().get(id as usize).and_then(|s| s.as_ref()) {
                 Some(p)
                     if can_reap(current, id) && !matches!(p.state, ProcessState::Terminated) =>
                 {
@@ -280,7 +289,7 @@ pub unsafe fn do_wait(idtype: u64, id: u32, options: u64) -> (u64, i32) {
             },
             P_ALL => {
                 for idx in 1..MAX_PROCESSES {
-                    let elig = match PROCESS_TABLE.get(idx).and_then(|s| s.as_ref()) {
+                    let elig = match process_table().get(idx).and_then(|s| s.as_ref()) {
                         Some(p) if !matches!(p.state, ProcessState::Terminated) => {
                             can_reap(current, idx as u32).then_some(p.state)
                         },
@@ -332,7 +341,7 @@ pub unsafe fn do_wait(idtype: u64, id: u32, options: u64) -> (u64, i32) {
         }
 
         let waited = if idtype == P_PID { id } else { 0 };
-        if let Some(Some(proc)) = PROCESS_TABLE.get_mut(current as usize) {
+        if let Some(Some(proc)) = process_table().get_mut(current as usize) {
             proc.state = ProcessState::Blocked(BlockReason::WaitChild(waited));
         }
         PROCESS_TABLE_LOCK.unlock();

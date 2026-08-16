@@ -128,7 +128,7 @@ unsafe fn mmap_locked(pages: u64, prot: u64, fixed: bool, addr: u64) -> u64 {
 
     // Tag with the creating thread's tid (its own slot id) so reap can reclaim a
     // detached thread's stack/TLS from the leader's shared table. `current_pid`
-    // reads the per-core slot, not PROCESS_TABLE, so it can't alias `proc`.
+    // reads the per-core slot, not process_table, so it can't alias `proc`.
     let owner_tid = SCHEDULER.current_pid();
     if proc
         .vma_table

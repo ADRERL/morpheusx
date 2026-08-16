@@ -24,8 +24,8 @@
 use crate::hal;
 use crate::process::{BlockReason, ProcessState};
 use crate::schedular::{
-    dec_timed_block_count, get_earliest_deadline, inc_timed_block_count, try_set_earliest_deadline,
-    PROCESS_TABLE, PROCESS_TABLE_LOCK, SCHEDULER,
+    dec_timed_block_count, get_earliest_deadline, inc_timed_block_count, process_table,
+    try_set_earliest_deadline, PROCESS_TABLE_LOCK, SCHEDULER,
 };
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use morpheus_foundation::flags::{EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EPOLLRDHUP};
@@ -201,10 +201,10 @@ pub fn wake_token(token: u64) {
 /// degenerates to a single token). Lets a member `set_ready` wake both the member's
 /// own waiters and the global net-wake (epoll) waiters in a single pass.
 fn wake_tokens(a: u64, b: u64) {
-    // SAFETY: PROCESS_TABLE mutated only under its lock.
+    // SAFETY: process_table() mutated only under its lock.
     unsafe {
         PROCESS_TABLE_LOCK.lock();
-        for slot in PROCESS_TABLE.iter_mut() {
+        for slot in process_table().iter_mut() {
             if let Some(proc) = slot.as_mut() {
                 if let ProcessState::Blocked(BlockReason::IoReady(t)) = proc.state {
                     if t == a || t == b {
@@ -271,7 +271,7 @@ pub unsafe fn wait_ready(token: u64, interest: u32, deadline_tsc: u64) -> WaitOu
             return WaitOutcome::Ready(m);
         }
         let pid = SCHEDULER.current_pid();
-        if let Some(Some(proc)) = PROCESS_TABLE.get_mut(pid as usize) {
+        if let Some(Some(proc)) = process_table().get_mut(pid as usize) {
             proc.futex_timed_out = false;
             proc.state = ProcessState::Blocked(BlockReason::IoReady(token));
             if deadline_tsc != 0 {

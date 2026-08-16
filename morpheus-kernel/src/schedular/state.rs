@@ -5,7 +5,8 @@ use crate::process::{
     MAX_PROCESSES,
 };
 use crate::serial::{put_hex32, puts};
-use core::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 /// `usize`-typed alias of `morpheus_foundation::MAX_CPUS` for `[T; MAX_CPUS]` array sizing.
 pub const MAX_CPUS: usize = morpheus_foundation::MAX_CPUS as usize;
@@ -42,7 +43,38 @@ pub enum SchedulerTransitionReason {
     ThermalEmergency = 6,
 }
 
-pub static mut PROCESS_TABLE: [Option<Process>; MAX_PROCESSES] = [const { None }; MAX_PROCESSES];
+// bss-backed process table. the all-None initializer is not all-zero (Option
+// uses a niche in Process), so a plain static ships ~7 MiB of .data in the
+// image. the slots are written at boot by init_process_table() instead.
+static mut PT_STORAGE: MaybeUninit<[Option<Process>; MAX_PROCESSES]> = MaybeUninit::uninit();
+static PT_INIT_STARTED: AtomicBool = AtomicBool::new(false);
+static PT_READY: AtomicBool = AtomicBool::new(false);
+
+/// SAFETY: same aliasing rules as the old `static mut` table - callers hold
+/// PROCESS_TABLE_LOCK for any cross-cpu mutation.
+#[inline]
+#[allow(static_mut_refs)]
+pub unsafe fn process_table() -> &'static mut [Option<Process>; MAX_PROCESSES] {
+    assert!(
+        PT_READY.load(Ordering::Acquire),
+        "process table read before init_process_table"
+    );
+    &mut *PT_STORAGE.as_mut_ptr()
+}
+
+/// bsp, once, before install_hal and before any kernel path can run.
+#[allow(static_mut_refs)]
+pub unsafe fn init_process_table() {
+    assert!(
+        !PT_INIT_STARTED.swap(true, Ordering::AcqRel),
+        "init_process_table called twice"
+    );
+    let base = PT_STORAGE.as_mut_ptr() as *mut Option<Process>;
+    for i in 0..MAX_PROCESSES {
+        base.add(i).write(None);
+    }
+    PT_READY.store(true, Ordering::Release);
+}
 
 pub static PROCESS_TABLE_LOCK: crate::sync::IsrSafeRawSpinLock =
     crate::sync::IsrSafeRawSpinLock::new();
@@ -175,7 +207,7 @@ pub(crate) fn clear_waiter_all(pid: u32) {
 pub(crate) unsafe fn cleanup_stale_waiters() {
     STDIN_WAITERS.for_each(|bit| {
         let live = matches!(
-            PROCESS_TABLE.get(bit as usize),
+            process_table().get(bit as usize),
             Some(Some(p)) if matches!(p.state, ProcessState::Blocked(BlockReason::StdinRead))
         );
         if !live {
@@ -185,7 +217,7 @@ pub(crate) unsafe fn cleanup_stale_waiters() {
 
     INPUT_WAITERS.for_each(|bit| {
         let live = matches!(
-            PROCESS_TABLE.get(bit as usize),
+            process_table().get(bit as usize),
             Some(Some(p)) if matches!(p.state, ProcessState::Blocked(BlockReason::InputRead))
         );
         if !live {
@@ -196,7 +228,7 @@ pub(crate) unsafe fn cleanup_stale_waiters() {
     for (pipe_idx, waiter_set) in PIPE_WAITERS.iter().enumerate() {
         waiter_set.for_each(|bit| {
             let live = matches!(
-                PROCESS_TABLE.get(bit as usize),
+                process_table().get(bit as usize),
                 Some(Some(p)) if matches!(p.state, ProcessState::Blocked(BlockReason::PipeRead(idx)) if idx as usize == pipe_idx)
             );
             if !live {
@@ -208,7 +240,7 @@ pub(crate) unsafe fn cleanup_stale_waiters() {
     for waiter_set in FUTEX_WAITERS.iter() {
         waiter_set.for_each(|bit| {
             let live = matches!(
-                PROCESS_TABLE.get(bit as usize),
+                process_table().get(bit as usize),
                 Some(Some(p)) if matches!(p.state, ProcessState::Blocked(BlockReason::FutexWait(_)))
             );
             if !live {
@@ -603,13 +635,13 @@ pub struct Scheduler;
 
 pub static SCHEDULER: Scheduler = Scheduler;
 
-/// Look up `pid` in `PROCESS_TABLE` and run `f` on the live (non-freed) slot
+/// Look up `pid` in `process_table()` and run `f` on the live (non-freed) slot
 /// while `PROCESS_TABLE_LOCK` is held; the lock scopes the static-mut access.
 /// Returns `Err(not_found)` for a missing pid, `Err(terminated)` for a freed
 /// slot, else `Ok(f(slot))`.
 ///
 /// # Safety
-/// Same as any `PROCESS_TABLE` accessor: must not be called while the caller
+/// Same as any `process_table()` accessor: must not be called while the caller
 /// already holds `PROCESS_TABLE_LOCK` (non-reentrant spinlock).
 unsafe fn with_process_mut<T>(
     pid: u32,
@@ -618,7 +650,10 @@ unsafe fn with_process_mut<T>(
     f: impl FnOnce(&mut Process) -> T,
 ) -> Result<T, &'static str> {
     PROCESS_TABLE_LOCK.lock();
-    let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
+    let slot = match process_table()
+        .get_mut(pid as usize)
+        .and_then(|s| s.as_mut())
+    {
         Some(s) => s,
         None => {
             PROCESS_TABLE_LOCK.unlock();
@@ -645,7 +680,7 @@ unsafe fn with_process<T>(
     f: impl FnOnce(&Process) -> T,
 ) -> Result<T, &'static str> {
     PROCESS_TABLE_LOCK.lock();
-    let slot = match PROCESS_TABLE.get(pid as usize).and_then(|s| s.as_ref()) {
+    let slot = match process_table().get(pid as usize).and_then(|s| s.as_ref()) {
         Some(s) => s,
         None => {
             PROCESS_TABLE_LOCK.unlock();
@@ -666,7 +701,7 @@ impl Scheduler {
         let mut n = 0;
         unsafe {
             PROCESS_TABLE_LOCK.lock();
-            for slot in PROCESS_TABLE.iter() {
+            for slot in process_table().iter() {
                 if n >= out.len() {
                     break;
                 }
@@ -755,33 +790,33 @@ impl Scheduler {
     /// stays empty for non-leaders, so only the leader's shared table is closed.
     pub unsafe fn current_fd_table_mut(&self) -> &'static mut crate::storage::fs_api::FdTable {
         let pid = this_core_pid() as usize;
-        let leader = match PROCESS_TABLE[pid].as_ref() {
+        let leader = match process_table()[pid].as_ref() {
             Some(p) if p.thread_group_leader != 0 => p.thread_group_leader as usize,
             _ => pid,
         };
-        &mut PROCESS_TABLE[leader].as_mut().unwrap().fd_table
+        &mut process_table()[leader].as_mut().unwrap().fd_table
     }
 
     pub unsafe fn current_process_mut(&self) -> &'static mut Process {
         let pid = this_core_pid() as usize;
-        PROCESS_TABLE[pid].as_mut().unwrap()
+        process_table()[pid].as_mut().unwrap()
     }
 
     pub unsafe fn current_memory_leader_mut(&self) -> &'static mut Process {
         let pid = this_core_pid() as usize;
         let mut leader_pid = pid;
-        if let Some(p) = PROCESS_TABLE[pid].as_ref() {
+        if let Some(p) = process_table()[pid].as_ref() {
             if p.thread_group_leader != 0 {
                 leader_pid = p.thread_group_leader as usize;
             }
         }
-        PROCESS_TABLE[leader_pid].as_mut().unwrap()
+        process_table()[leader_pid].as_mut().unwrap()
     }
 
     /// Thread-group leader pid for the current thread (the address-space owner).
     pub unsafe fn current_memory_leader_pid(&self) -> u32 {
         let pid = this_core_pid() as usize;
-        if let Some(p) = PROCESS_TABLE[pid].as_ref() {
+        if let Some(p) = process_table()[pid].as_ref() {
             if p.thread_group_leader != 0 {
                 return p.thread_group_leader;
             }
@@ -799,7 +834,7 @@ impl Scheduler {
     /// Thread-group leader pid for an arbitrary pid (its address-space owner).
     /// Returns `pid` unchanged if it has no live entry (caller still range-checks).
     pub unsafe fn memory_leader_pid_of(&self, pid: u32) -> u32 {
-        PROCESS_TABLE
+        process_table()
             .get(pid as usize)
             .and_then(|s| s.as_ref())
             .map(|p| {
@@ -822,17 +857,17 @@ impl Scheduler {
     }
 
     pub unsafe fn memory_leader_mut_by_pid(&self, pid: u32) -> Option<&'static mut Process> {
-        let p = PROCESS_TABLE.get(pid as usize)?.as_ref()?;
+        let p = process_table().get(pid as usize)?.as_ref()?;
         let leader_pid = if p.thread_group_leader != 0 {
             p.thread_group_leader as usize
         } else {
             pid as usize
         };
-        PROCESS_TABLE.get_mut(leader_pid)?.as_mut()
+        process_table().get_mut(leader_pid)?.as_mut()
     }
 
     pub unsafe fn process_by_pid(&self, pid: u32) -> Option<&'static Process> {
-        PROCESS_TABLE.get(pid as usize).and_then(|s| s.as_ref())
+        process_table().get(pid as usize).and_then(|s| s.as_ref())
     }
 
     pub unsafe fn send_signal(&self, pid: u32, sig: Signal) -> Result<(), &'static str> {
@@ -843,7 +878,10 @@ impl Scheduler {
     }
 
     pub unsafe fn send_signal_inner(&self, pid: u32, sig: Signal) -> Result<(), &'static str> {
-        let slot = match PROCESS_TABLE.get_mut(pid as usize).and_then(|s| s.as_mut()) {
+        let slot = match process_table()
+            .get_mut(pid as usize)
+            .and_then(|s| s.as_mut())
+        {
             Some(s) => s,
             None => return Err("send_signal: PID not found"),
         };
