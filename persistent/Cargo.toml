@@ -15,3 +15,6 @@ edition.workspace = true
 
 # Future: armv7 support
 # [target.'cfg(target_arch = "arm")'.dependencies]
+
+[dev-dependencies]
+goblin = "0.9"
