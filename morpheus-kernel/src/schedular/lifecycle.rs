@@ -11,6 +11,7 @@ use crate::process::{
 };
 use crate::sched_hooks;
 use crate::serial::{put_hex32, puts};
+use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 
 pub unsafe fn set_tsc_frequency(freq: u64) {
@@ -77,7 +78,7 @@ pub unsafe fn init_scheduler() {
     kernel_proc.cr3 = cr3 & 0x000F_FFFF_FFFF_F000;
     KERNEL_CR3 = kernel_proc.cr3;
 
-    process_table()[0] = Some(kernel_proc);
+    process_table()[0] = Some(Box::new(kernel_proc));
     LIVE_COUNT.store(1, Ordering::SeqCst);
     set_this_core_pid(0);
     SCHEDULER_READY = true;
@@ -104,16 +105,12 @@ pub unsafe fn spawn_kernel_thread(
     PROCESS_TABLE_LOCK.lock();
 
     let slot_idx = (1..MAX_PROCESSES)
-        .find(|&i| {
-            process_table()[i]
-                .as_ref()
-                .map(|p| p.is_free())
-                .unwrap_or(true)
-        })
+        .find(|&i| process_table()[i].is_none())
         .ok_or_else(|| {
             PROCESS_TABLE_LOCK.unlock();
             "process table full"
         })?;
+    super::state::REAPED.clear(slot_idx as u32);
 
     let pid = slot_idx as u32;
 
@@ -144,7 +141,7 @@ pub unsafe fn spawn_kernel_thread(
     let _ = (pid, entry_fn);
     crate::serial::log_info("SCHED", 770, "kernel thread spawned");
 
-    process_table()[slot_idx] = Some(proc);
+    process_table()[slot_idx] = Some(Box::new(proc));
     LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
 
     PROCESS_TABLE_LOCK.unlock();

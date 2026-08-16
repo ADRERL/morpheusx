@@ -4,14 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Platform-specific relocation engines
-# (conditionally compiled based on target)
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 # x86_64-specific deps if needed
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 # ARM64-specific deps if needed
-
-# Future: armv7 support
-# [target.'cfg(target_arch = "arm")'.dependencies]

@@ -753,10 +753,6 @@ unsafe fn stage_c1_platform_init(ctx: &BootContext) -> PlatformInit {
     //
     // SAFETY: BSP, single-threaded; `HalImpl::new()` has no hardware
     // preconditions (it's a zero-sized struct), so it's safe pre-phase-1.
-    // the process table lives in .bss; it must be written before platform
-    // init runs, since phase 9 hooks already call into kernel code.
-    unsafe { morpheus_kernel::schedular::init_process_table() };
-
     morpheus_kernel::install_hal(unsafe { morpheus_hal_x86_64::platform::init() });
 
     // Keep the pre-EBS HelixFS image out of the buddy: it's UEFI LoaderData
@@ -1042,6 +1038,25 @@ unsafe fn stage_e2_enter_userspace(_ctx: &BootContext) -> ! {
 
 /// Spin until keypress. USB HID primary; PS/2 fallback when no USB keyboard detected.
 fn boot_log_gate(keyboard: &mut Keyboard) {
+    // effective ram at boot: heap_used tracks boxed kernel state (process
+    // slots etc), buddy_free is total unclaimed ram
+    {
+        use morpheus_hal_x86_64::serial::put_hex64;
+        puts("[MEM] footprint heap_used=");
+        if let Some((size, used, _)) = morpheus_hal_x86_64::heap::heap_stats() {
+            put_hex64(used as u64);
+            puts("/");
+            put_hex64(size as u64);
+        } else {
+            puts("none");
+        }
+        puts(" buddy_free=");
+        put_hex64(unsafe { morpheus_hal_x86_64::memory::global_registry().free_memory() });
+        puts(" procs=");
+        put_hex64(morpheus_kernel::schedular::SCHEDULER.live_count() as u64);
+        puts("\n");
+    }
+
     // deterministic token for scripts/qemu-e2e.sh: kernel core is fully up here
     puts("\nMORPHEUSX_BOOT_OK\n");
     puts("\nPress any key to start userspace...");

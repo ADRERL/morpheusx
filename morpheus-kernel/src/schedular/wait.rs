@@ -103,13 +103,17 @@ unsafe fn reap_zombie(pid: u32) -> Option<(i32, i32)> {
     let leader_pid = child.thread_group_leader;
 
     free_process_resources(child);
-    child.state = ProcessState::Terminated;
 
     // Reclaim the thread's own VMAs from the leader (a full-process teardown, i.e.
     // `leader_pid == 0`, already frees every VMA in `free_process_resources`).
     if leader_pid != 0 {
         reclaim_thread_vmas(leader_pid, pid);
     }
+
+    // drop the slot's box: reap runs in syscall context, so the heap mutex is
+    // safe to take here (never from tick/isr)
+    super::state::REAPED.set(pid);
+    process_table()[pid as usize] = None;
 
     crate::serial::puts("[SCHED] reaped PID ");
     crate::serial::put_hex32(pid);
@@ -186,18 +190,17 @@ pub unsafe fn wait_for_child(target: u32) -> u64 {
             Some(p) => p.state,
             None => {
                 PROCESS_TABLE_LOCK.unlock();
-                return ESRCH;
+                return if super::state::REAPED.contains(target) {
+                    ECHILD
+                } else {
+                    ESRCH
+                };
             },
         };
 
         if !can_reap(current, target) {
             PROCESS_TABLE_LOCK.unlock();
             return ESRCH;
-        }
-
-        if matches!(state, ProcessState::Terminated) {
-            PROCESS_TABLE_LOCK.unlock();
-            return ECHILD;
         }
 
         if state == ProcessState::Zombie {
@@ -235,18 +238,17 @@ pub unsafe fn try_wait_child(target: u32) -> u64 {
         Some(p) => p.state,
         None => {
             PROCESS_TABLE_LOCK.unlock();
-            return ESRCH;
+            return if super::state::REAPED.contains(target) {
+                ECHILD
+            } else {
+                ESRCH
+            };
         },
     };
 
     if !can_reap(current, target) {
         PROCESS_TABLE_LOCK.unlock();
         return ESRCH;
-    }
-
-    if matches!(state, ProcessState::Terminated) {
-        PROCESS_TABLE_LOCK.unlock();
-        return ECHILD;
     }
 
     if state == ProcessState::Zombie {

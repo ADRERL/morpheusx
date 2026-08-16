@@ -5,8 +5,8 @@ use crate::process::{
     MAX_PROCESSES,
 };
 use crate::serial::{put_hex32, puts};
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use alloc::boxed::Box;
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 /// `usize`-typed alias of `morpheus_foundation::MAX_CPUS` for `[T; MAX_CPUS]` array sizing.
 pub const MAX_CPUS: usize = morpheus_foundation::MAX_CPUS as usize;
@@ -43,37 +43,18 @@ pub enum SchedulerTransitionReason {
     ThermalEmergency = 6,
 }
 
-// bss-backed process table. the all-None initializer is not all-zero (Option
-// uses a niche in Process), so a plain static ships ~7 MiB of .data in the
-// image. the slots are written at boot by init_process_table() instead.
-static mut PT_STORAGE: MaybeUninit<[Option<Process>; MAX_PROCESSES]> = MaybeUninit::uninit();
-static PT_INIT_STARTED: AtomicBool = AtomicBool::new(false);
-static PT_READY: AtomicBool = AtomicBool::new(false);
+// boxed slots: the table itself is 2 kib of bss (null-niche None is all-zero)
+// and each 28 kib Process is heap-allocated at spawn, so ram scales with live
+// processes instead of a fixed 7 mib. boxes are dropped only in syscall
+// context (wait reap / spawn reuse) - the kernel heap mutex is not isr-safe.
+static mut PROCESS_TABLE: [Option<Box<Process>>; MAX_PROCESSES] = [const { None }; MAX_PROCESSES];
 
-/// SAFETY: same aliasing rules as the old `static mut` table - callers hold
+/// SAFETY: same aliasing rules as a bare `static mut` table - callers hold
 /// PROCESS_TABLE_LOCK for any cross-cpu mutation.
 #[inline]
 #[allow(static_mut_refs)]
-pub unsafe fn process_table() -> &'static mut [Option<Process>; MAX_PROCESSES] {
-    assert!(
-        PT_READY.load(Ordering::Acquire),
-        "process table read before init_process_table"
-    );
-    &mut *PT_STORAGE.as_mut_ptr()
-}
-
-/// bsp, once, before install_hal and before any kernel path can run.
-#[allow(static_mut_refs)]
-pub unsafe fn init_process_table() {
-    assert!(
-        !PT_INIT_STARTED.swap(true, Ordering::AcqRel),
-        "init_process_table called twice"
-    );
-    let base = PT_STORAGE.as_mut_ptr() as *mut Option<Process>;
-    for i in 0..MAX_PROCESSES {
-        base.add(i).write(None);
-    }
-    PT_READY.store(true, Ordering::Release);
+pub unsafe fn process_table() -> &'static mut [Option<Box<Process>>; MAX_PROCESSES] {
+    &mut *core::ptr::addr_of_mut!(PROCESS_TABLE)
 }
 
 pub static PROCESS_TABLE_LOCK: crate::sync::IsrSafeRawSpinLock =
@@ -131,6 +112,10 @@ pub(super) static THERMAL_SOURCE_TSC: AtomicU64 = AtomicU64::new(0);
 pub(super) static mut SCHEDULER_READY: bool = false;
 pub(super) static mut KERNEL_CR3: u64 = 0;
 pub(super) static mut TSC_FREQUENCY: u64 = 0;
+
+// reaped slots are dropped to None; this bit keeps wait's reaped-vs-never-
+// spawned errno distinction (ECHILD vs ESRCH). cleared when a slot is claimed.
+pub(super) static REAPED: PidBitset = PidBitset::new();
 
 // Lock-free per-resource waiter sets, scaling to MAX_PROCESSES slots.
 static STDIN_WAITERS: PidBitset = PidBitset::new();
@@ -680,7 +665,7 @@ unsafe fn with_process<T>(
     f: impl FnOnce(&Process) -> T,
 ) -> Result<T, &'static str> {
     PROCESS_TABLE_LOCK.lock();
-    let slot = match process_table().get(pid as usize).and_then(|s| s.as_ref()) {
+    let slot = match process_table().get(pid as usize).and_then(|s| s.as_deref()) {
         Some(s) => s,
         None => {
             PROCESS_TABLE_LOCK.unlock();
@@ -863,11 +848,14 @@ impl Scheduler {
         } else {
             pid as usize
         };
-        process_table().get_mut(leader_pid)?.as_mut()
+        process_table()
+            .get_mut(leader_pid)?
+            .as_mut()
+            .map(|b| &mut **b)
     }
 
     pub unsafe fn process_by_pid(&self, pid: u32) -> Option<&'static Process> {
-        process_table().get(pid as usize).and_then(|s| s.as_ref())
+        process_table().get(pid as usize).and_then(|s| s.as_deref())
     }
 
     pub unsafe fn send_signal(&self, pid: u32, sig: Signal) -> Result<(), &'static str> {

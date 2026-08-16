@@ -4,6 +4,7 @@ use crate::hal;
 use crate::process::{
     BlockReason, CpuContext, Process, ProcessState, MAX_PROCESSES, MAX_USER_PROCESSES,
 };
+use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 use morpheus_foundation::flags::open_flags;
 use morpheus_foundation::flags::THREAD_DETACHED;
@@ -27,12 +28,9 @@ unsafe fn count_user_processes() -> usize {
 /// Lowest free slot at/above 1, reclaiming detached-thread zombies in passing.
 unsafe fn find_free_slot() -> Option<usize> {
     super::wait::reap_detached_zombies();
-    (1..MAX_PROCESSES).find(|&i| {
-        process_table()[i]
-            .as_ref()
-            .map(|p| p.is_free())
-            .unwrap_or(true)
-    })
+    let i = (1..MAX_PROCESSES).find(|&i| process_table()[i].is_none())?;
+    super::state::REAPED.clear(i as u32);
+    Some(i)
 }
 
 /// Thread sharing the caller's CR3. TLS base is set at creation (no
@@ -86,7 +84,7 @@ pub unsafe fn spawn_user_thread(
     // Fresh occupant of a reused slot starts with blocking stdin.
     crate::process::set_stdin_nonblock(tid, false);
 
-    process_table()[slot_idx] = Some(Process::empty());
+    process_table()[slot_idx] = Some(Box::new(Process::empty()));
     let thread = process_table()[slot_idx].as_mut().ok_or_else(|| {
         PROCESS_TABLE_LOCK.unlock();
         "failed to initialize thread slot"
@@ -248,7 +246,7 @@ pub unsafe fn spawn_user_process(
         if let Some(Some(parent)) = process_table().get(parent_pid) {
             // SAFETY: parent and proc are distinct slots; copy out a raw ptr to
             // sidestep the borrow on the shared static table.
-            let parent_ref: &Process = &*(parent as *const Process);
+            let parent_ref: &Process = &*(&**parent as *const Process);
             inherit_fds_minus_cloexec(&mut proc, parent_ref);
         }
     }
@@ -287,7 +285,7 @@ pub unsafe fn spawn_user_process(
     let _ = (pid, image.entry, proc.cr3);
     crate::serial::log_info("SCHED", 771, "user process spawned");
 
-    process_table()[slot_idx] = Some(proc);
+    process_table()[slot_idx] = Some(Box::new(proc));
     LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
 
     PROCESS_TABLE_LOCK.unlock();
