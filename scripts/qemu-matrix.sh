@@ -50,7 +50,10 @@ VARS_CANDS=(/usr/share/edk2/x64/OVMF_VARS.4m.fd /usr/share/OVMF/OVMF_VARS_4M.fd 
 info "OVMF_CODE=$OVMF_CODE"; info "OVMF_VARS=$OVMF_VARS"
 
 mkdir -p "$ESP_DIR/EFI/BOOT"
-cp "$EFI" "$ESP_DIR/EFI/BOOT/BOOTX64.EFI"
+# skip the copy when the input already is the staged esp file
+if [[ "$(realpath "$EFI")" != "$(realpath "$ESP_DIR/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true)" ]]; then
+  cp "$EFI" "$ESP_DIR/EFI/BOOT/BOOTX64.EFI"
+fi
 info "staged $(basename "$EFI") -> $ESP_DIR/EFI/BOOT/BOOTX64.EFI"
 
 kvm_args() {

@@ -22,12 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # rust-toolchain.toml already pins 1.92.0 + the x86_64-unknown-uefi target; install it
+      # rust-toolchain.toml already pins 1.97.1 + the x86_64-unknown-uefi target; install it
       # explicitly too so the step is self-describing and doesn't rely on lazy rustup install.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.92.0"
+          toolchain: "1.97.1"
           targets: x86_64-unknown-uefi
 
       - name: Cache cargo + target

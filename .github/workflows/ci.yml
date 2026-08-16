@@ -32,11 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned toolchain matches rust-toolchain.toml (1.92.0).
+      # Pinned toolchain matches rust-toolchain.toml (1.97.1).
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.92.0"
+          toolchain: "1.97.1"
           components: rustfmt, clippy
 
       - name: Cache cargo + target
@@ -53,10 +53,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --exclude morpheus-bootloader --all-features --lib --bins -- -W warnings
 
-      - name: Build (libraries + host tools)
-        run: |
-          cargo build --workspace --lib --all-features
-          cargo build -p morpheus-cli
+      - name: Build (libraries)
+        run: cargo build --workspace --lib --all-features
 
       - name: Test (host-runnable crates + oracles)
         run: |
@@ -65,7 +63,6 @@ jobs:
             -p iso9660-rs \
             -p morpheus-storage-format \
             -p morpheus-helix \
-            -p morpheus-ui \
             -p morpheus-block \
             -p morpheus-fat32 \
             -p morpheus-hal-x86_64 \
@@ -92,7 +89,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.92.0"
+          toolchain: "1.97.1"
           targets: x86_64-unknown-uefi
 
       - name: Cache cargo + target

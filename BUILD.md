@@ -138,7 +138,7 @@ Downloads Tails, builds, runs. ~10min on decent connection.
 
 | Script | Purpose |
 |--------|---------|
-| `setup-dev.sh` | Repo-root entrypoint: setup / build / run / deploy |
+| `setup-dev.sh` | Repo-root entrypoint: setup / build / run / flash |
 | `debug.sh` | Connect GDB to QEMU :1234 |
 | `testing/run.sh` | Thin shim → `./setup-dev.sh run` (QEMU + OVMF launch) |
 | `testing/build.sh` | 2-pass build with reloc extraction |
